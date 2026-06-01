@@ -172,6 +172,7 @@ def getState(stateName, countryCode, argumentType='name'):
                 if argumentType == 'code':
                     return subdivision.code.split('-')[1]
                 else:
+                    st.warning(f"State name {stateName} is close to {subdivision.name}. Assuming you meant {subdivision.name}.")
                     return subdivision.name
     except Exception as e:
         st.warning(f"An error occurred while validating state: {str(e)}")
@@ -445,16 +446,17 @@ def validateStreetType(address):
             streetAddress = re.sub(r'\b' + re.escape(token) + r'\b', standardizedType, address, flags=re.IGNORECASE)
             return streetAddress.upper()
 
-    st.warning(formatString(address) + " | does not contain a valid street type.")
+    #st.warning(formatString(address) + " | does not contain a valid street type.")
     return None
 
 def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowCol):
-    #st.info(f"Attempting to fix swapped columns for the following data: {addressLineCol}, {cityCol}, {stateCol}, {postalCodeCol}, {countryRowCol}")
+    st.info(f"Attempting to fix swapped columns for the following data: {addressLineCol}, {cityCol}, {stateCol}, {postalCodeCol}, {countryRowCol}")
     foundCountry = None
     foundState = None
     foundPostalCode = None
     foundAddressLine = None
     foundCity = None
+    confidence = 1
     
     tempList = [addressLineCol, cityCol, stateCol, postalCodeCol, countryRowCol]
     for i in range(len(tempList)):
@@ -466,21 +468,26 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
             break
             
     for j in range(len(tempList)):
-        print(tempList)
-        print(j)
-        st.info(f"Testing {tempList[j]}.")
-        st.info(j)
-        test = tempList[j]
-        testState = getState(test, foundCountry, "code")
-        st.info(f"Testing {test} for state with country {foundCountry}. Result: {testState}")
+        test = tempList[j].strip()
+        testState = getState(test, foundCountry, "name")
+        #st.info(f"Testing {test} for state with country {foundCountry}. Result: {testState}")
         testStreet = validateStreetType(abbreviateAddress(test))
         if testState:
             foundState = testState
-        if testStreet:
+        elif testStreet:
             foundAddressLine = testStreet
-        if len(test) <= 9 and any(char.isdigit() for char in test):
+        #Check if 30 characters or shorter and contains no spaces and digits, it's likely a city name
+        elif len(test) <= 30 and not any(char.isdigit() for char in test) and " " not in test:
+            foundCity = test
+            confidence =0
+        #Check if 9 digits or shorter and contains digits, it's likely a postal code
+        elif len(test) <= 9 and any(char.isdigit() for char in test):
             foundPostalCode = normalizePostalCode(test, foundCountry)
-        if foundCountry and foundState and foundPostalCode and foundAddressLine:
+        #If it contains spaces and digits and is longer than 8 characters, it's likely an address line
+        elif len(test) > 8 and any(char.isdigit() for char in test) and " " in test:
+            foundAddressLine = test
+            confidence = 0
+        elif foundCountry and foundState and foundPostalCode and foundAddressLine:
             foundCity = test
             
     if not foundCountry or not foundState or not foundPostalCode or not foundAddressLine or not foundCity:
@@ -493,7 +500,8 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
             'state': foundState,
             'postalCode': foundPostalCode,
             'streetAddress': foundAddressLine,
-            'city': foundCity
+            'city': foundCity,
+            'confidence': confidence
         }
         return address
     return None
@@ -543,10 +551,13 @@ if uploadedFile:
                         st.write(f"{address} is invalid. However, after attempting to fix swapped columns, {tryFix['streetAddress']}, {tryFix['state']}, {tryFix['postalCode']}, {tryFix['country']} is valid.")
                     else:
                         invalid += 1
-                        st.write(f"{address} is invalid. Reason: {newResult}. Also attempted to fix swapped columns, but it still failed validation. Reason: {newResult}")
+                        st.write(f"{address} is invalid. Reason: {validateResult}. Also attempted to fix swapped columns, but it still failed validation. Reason: {newResult}")
                 else:
                     invalid += 1
                     st.write(f"{address}is invalid. Reason: {validateResult}")
 
     st.success(f"Validation complete! Valid addresses: {valid}, Invalid addresses: {invalid}")
+    #States of england
+    for subdivision in pycountry.subdivisions.get(country_code='GB'):
+        st.write(subdivision.name)
 
