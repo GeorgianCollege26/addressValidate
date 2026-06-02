@@ -152,34 +152,40 @@ def getCountryCode(countryName):
         return None
     
 def getState(stateName, countryCode, argumentType='name'):
+    #Function that can take a state name or code (Allowing for minor misspellings) and a country code, and return the standardized state name or code based on the argumentType 
     if not stateName or not countryCode:
         return None
     try:
-        stateName = str(stateName).strip()
-        
-        #Check if state is already a code
+        stateName = formatString(str(stateName).strip())
         subdivisions = pycountry.subdivisions.get(country_code=countryCode)
+        #subdivisionNames = [subdivision.name for subdivision in subdivisions]
         for subdivision in subdivisions:
-            #checking with difflib to account for minor typos and accented characters
-            if difflib.get_close_matches(stateName.upper(), [subdivision.code.split('-')[1]], n=1) and difflib.get_close_matches(stateName.upper(), [subdivision.code.split('-')[1]], n=1)[0] == subdivision.code.split('-')[1]:
-                if argumentType == 'code':
-                    return subdivision.code.split('-')[1]
-                else:
+            
+            #Word match
+            if stateName.lower() in subdivision.name.lower():
+                if argumentType == 'name':
                     return subdivision.name
-        #If not, try to find it by name
-        for subdivision in subdivisions:
-            if difflib.get_close_matches(stateName.capitalize(), [subdivision.name], n=1) and difflib.get_close_matches(stateName.capitalize(), [subdivision.name], n=1)[0] == subdivision.name:
-                if argumentType == 'code':
-                    return subdivision.code.split('-')[1]
-                else:
-                    st.warning(f"State name {stateName} is close to {subdivision.name}. Assuming you meant {subdivision.name}.")
+                return subdivision.code.split('-')[1]
+            #Allow for minor misspellings using difflib
+            elif difflib.SequenceMatcher(None, subdivision.name.lower(), stateName.lower()).ratio() > 0.85:
+                if argumentType == 'name':
                     return subdivision.name
+                return subdivision.code.split('-')[1]
+            
+            #Code match
+            elif stateName.lower() in subdivision.code.split('-')[1].lower():
+                if argumentType == 'name':
+                    return subdivision.name
+                return subdivision.code.split('-')[1]
+            elif difflib.SequenceMatcher(None, subdivision.code.split('-')[1].lower(), stateName.lower()).ratio() > 0.85:
+                if argumentType == 'name':
+                    return subdivision.name
+                return subdivision.code.split('-')[1]
     except Exception as e:
         st.warning(f"An error occurred while validating state: {str(e)}")
         return None
-                
-    return None
-        
+
+
 def abbreviateAddress(address):
     # shorten things like south, north, east, west to S, N, E, W
     if not address:
@@ -468,7 +474,7 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
             break
             
     for j in range(len(tempList)):
-        test = tempList[j].strip()
+        test = formatString(str(tempList[j]).strip())
         testState = getState(test, foundCountry, "name")
         #st.info(f"Testing {test} for state with country {foundCountry}. Result: {testState}")
         testStreet = validateStreetType(abbreviateAddress(test))
@@ -548,7 +554,7 @@ if uploadedFile:
                     newResult = validateAddress(tryFix)
                     if isinstance(newResult, dict):
                         valid += 1
-                        st.write(f"{address} is invalid. However, after attempting to fix swapped columns, {tryFix['streetAddress']}, {tryFix['state']}, {tryFix['postalCode']}, {tryFix['country']} is valid.")
+                        st.write(f"{address} is invalid. However, after attempting to fix swapped columns, {tryFix['streetAddress']}, {tryFix['state']}, {tryFix['postalCode']}, {tryFix['country']} is valid. Confidence level of fix: {tryFix['confidence']}")
                     else:
                         invalid += 1
                         st.write(f"{address} is invalid. Reason: {validateResult}. Also attempted to fix swapped columns, but it still failed validation. Reason: {newResult}")
@@ -558,6 +564,6 @@ if uploadedFile:
 
     st.success(f"Validation complete! Valid addresses: {valid}, Invalid addresses: {invalid}")
     #States of england
-    for subdivision in pycountry.subdivisions.get(country_code='GB'):
+    for subdivision in pycountry.subdivisions.get(country_code='FR'):
         st.write(subdivision.name)
 
