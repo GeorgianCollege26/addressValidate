@@ -25,7 +25,7 @@ def validateState(country, state):
             return subdivision.code.split('-')[1]
     return False
 
-def formatString(string, removeAccents=True, removePunctuation=True):
+def formatString(string, removeAccents=True, removePunctuation=True, toUpper=False, leaveApostrophes=False):
     if not string:
         return None
 
@@ -38,16 +38,19 @@ def formatString(string, removeAccents=True, removePunctuation=True):
             c for c in string
             if not unicodedata.combining(c)
         )
+
     if removePunctuation:
-        #replace ' and similar marks with a space,
-        string = re.sub(r'[\'\"`´]', ' ', string)
+        string = re.sub(r'[\\.,/()*?><;:]', '', string)
+        string = re.sub(r'[`"]', "'", string)
+        if not leaveApostrophes:
+            string = re.sub(r"'", ' ', string)
         # Remove punctuation
-        string = re.sub(r'[^\w\s]', '', string)
+        string = re.sub(r'[^\w\s]', ' ', string)
 
     # Replace multiple spaces with a single space
     string = re.sub(r'\s+', ' ', string)
 
-    return string
+    return string.upper() if toUpper else string
 
 def validatePostalCode(country, postalCode):
     # Define regex patterns for postal codes based on country
@@ -68,7 +71,7 @@ def validatePostalCode(country, postalCode):
     matchCode = re.match(pattern, str(postalCode))
     matchCode2 = re.match(pattern, normalizePostalCode(str(postalCode), country))
     if pattern and matchCode:
-        return 
+        return matchCode.group(0)
     elif pattern and matchCode2:
         return matchCode2
     return False
@@ -92,8 +95,15 @@ def normalizePostalCode(postalCode, country):
 
 
 def validateAddress(address):
+    # If no address is provided, return an error message
     if not address:
         return "No address provided."
+    
+    # If any of the required fields are missing, return an error message specifying which field is missing
+    for field in ['country', 'state', 'city', 'postalCode', 'streetAddress']:
+        if address.get(field) == None or str(address.get(field)).strip().lower() == "none":
+            return f"{field} is required."
+
     try:
         # Give address as a dictionary with keys: country, state, postal_code, street_type
         try:
@@ -106,24 +116,38 @@ def validateAddress(address):
                 return f"Invalid country: {address.get('country')}"
         countryCode = country.alpha_2 if country else None
         countryName = country.name.upper() if country else None
-
-        stateCode = getState(address.get('state'), countryCode, "code") if address.get('state') else None
-        stateName = getState(address.get('state'), countryCode, "name") if address.get('state') else None
-
-        postalCode = address.get('postalCode')
-        streetAddress = address.get('streetAddress')
+        if not country:
+            return f"Invalid country: {address.get('country')}"
+        state = address.get('state')
+        if not state:
+            return "State/Province is required."
         
+        stateCode = getState(state, countryCode, "code") if address.get('state') else None
+        stateName = getState(state, countryCode, "name") if address.get('state') else None
+
+        city = address.get('city')
+        if not city:
+            return "City is required."
+        postalCode = address.get('postalCode')
+        if not postalCode:
+            return "Postal code is required."
+        streetAddress = address.get('streetAddress')
+        if not streetAddress:
+            return "Street address is required."
+        
+        streetValid = validateStreetType(abbreviateAddress(streetAddress))
         stateValid = validateState(countryCode, stateCode)
         postalCodeValid = validatePostalCode(countryCode, postalCode)
+
         if stateValid == False: 
             return f"Invalid state/province for the specified country {countryCode}/{stateCode}"
 
         if postalCodeValid == False:
-            return f"Invalid postal code format for the specified country. {postalCodeValid}"
+            return f"Invalid postal code format for the specified country. {postalCode}"
         
-        if not streetAddress:
+        if not streetValid:
             return "Street type could not be determined from the address."
-        if streetAddress[0] == None:
+        if streetValid[0] == None:
             return "Street type could not be determined from the address."
 
         # If all validations pass, return the validated address as a dictionary
@@ -132,11 +156,12 @@ def validateAddress(address):
             stateName = stateCode
         validatedAddress = { 
             'country': countryName,
-            'state': stateName,
-            'postalCode': postalCodeValid,
-            'streetAddress': streetAddress
+            'state': stateName.upper() if stateName else None,
+            'postalCode': formatString(postalCodeValid, toUpper=True, removeAccents=True, leaveApostrophes=True),
+            'streetAddress': formatString(streetValid, toUpper=True, removeAccents=True, leaveApostrophes=True),
+            'city': formatString(city, toUpper=True, removeAccents=True, leaveApostrophes=True)
         }
-        st.success(f"{streetAddress}, {stateName.upper()}, {postalCode}, {countryName} is valid.")
+        st.success(f"{validatedAddress['streetAddress']}, {validatedAddress['city']} {validatedAddress['state']}, {validatedAddress['postalCode']}, {validatedAddress['country']} is valid.")
         return validatedAddress
     except Exception as e:
         return f"An error occurred during validation: {str(e)}"
@@ -159,6 +184,9 @@ def getState(stateName, countryCode, argumentType='name'):
     if not stateName or not countryCode:
         return None
     try:
+        # Avoid matching Quebec city, Mexico City, etc as states/provinces
+        if ' city' in stateName.lower():
+            return None
         stateName = formatString(str(stateName).strip())
         subdivisions = pycountry.subdivisions.get(country_code=countryCode)
         subdivisionNames = [subdivision.name for subdivision in subdivisions]
@@ -464,71 +492,76 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
     confidenceError = []
     unclaimed = []
     
-    tempList = [addressLineCol, cityCol, stateCol, postalCodeCol, countryRowCol]
-    for i in range(len(tempList)):
-        test = tempList[i]
-        testCountry = getCountryCode(test)
+    colList = [addressLineCol, cityCol, stateCol, postalCodeCol, countryRowCol]
+    for i in range(len(colList)):
+        currentCol = colList[i]
+        testCountry = getCountryCode(currentCol)
         if testCountry:
             foundCountry = testCountry
-            tempList.pop(i)
+            colList.pop(i)
             break
             
-    for j in range(len(tempList)):
-        test = formatString(str(tempList[j]).strip(), removeAccents=True, removePunctuation=False)
-        unclaimed.append(test)
-        testState = getState(test, foundCountry, "name")
-        #st.info(f"Testing {test} for state with country {foundCountry}. Result: {testState}")
-        testStreet = validateStreetType(abbreviateAddress(test))
+    for j in range(len(colList)):
+        currentCol = formatString(str(colList[j]).strip(), removeAccents=True, removePunctuation=False)
+        unclaimed.append(currentCol)
+        testState = getState(currentCol, foundCountry, "name")
+        #st.info(f"Testing {currentCol} for state with country {foundCountry}. Result: {testState}")
+        testStreet = validateStreetType(abbreviateAddress(currentCol))
+
+
         if testState:
             foundState = testState
+            #if foundCity is the same as the state, the city match below likely miscaptured it
+            if foundCity and foundCity.lower() == foundState.lower():
+                    foundCity = None
+                    confidenceError.append("city")
             try:
-                unclaimed.remove(test)
+                unclaimed.remove(currentCol)
+                colList.remove(foundState)
             except ValueError:                
                 pass
+
             
         if testStreet:
             try:
-                confidenceError.remove("street address")
+                confidenceError.remove("address line")
             except ValueError:
                 pass
             foundAddressLine = testStreet
             try:
-                unclaimed.remove(test)
+                unclaimed.remove(currentCol)
+                colList.remove(testStreet)
             except ValueError:                
                 pass
-        #Check if 30 characters or shorter and contains no spaces and digits, it's likely a city name
-        if len(test) <= 30 and not any(char.isdigit() for char in test) and " " not in test.strip():
-            foundCity = test
-            confidenceError.append("city")
-            try:
-                unclaimed.remove(test)
-            except ValueError:                
-                pass
+
         #Check if 9 digits or shorter and contains digits, it's likely a postal code
-        if len(test) <= 9 and any(char.isdigit() for char in test):
-            foundPostalCode = normalizePostalCode(test, foundCountry)
+        if len(currentCol) <= 9 and any(char.isdigit() for char in currentCol):
+            foundPostalCode = normalizePostalCode(currentCol, foundCountry)
             try:
-                unclaimed.remove(test)
+                unclaimed.remove(currentCol)
+            except ValueError:                
+                pass
+        
+        # if it contains no digits and is shorter than 12 characters, it's likely a city name
+        if len(currentCol) < 12 and not any(char.isdigit() for char in currentCol) and foundState and foundCountry and currentCol.lower() != foundState.lower() and currentCol.lower() != foundCountry.lower():
+            foundCity = currentCol
+            try:
+                unclaimed.remove(currentCol)
             except ValueError:                
                 pass
 
         #If it contains spaces and digits and is longer than 8 characters, it's likely an address line
-        if len(test) > 8 and any(char.isdigit() for char in test) and " " in test:
-            foundAddressLine = test
+        if len(currentCol) > 8 and any(char.isdigit() for char in currentCol) and " " in currentCol and not testStreet:
+            foundAddressLine = currentCol
             confidenceError.append("address line")
             try:
-                unclaimed.remove(test)
+                unclaimed.remove(currentCol)
             except ValueError:                
                 pass
         if foundCountry and foundState and foundPostalCode and foundAddressLine and len(unclaimed) == 1:
             foundCity = unclaimed[0]
-            confidenceError.append("city")
             
-    if not foundCountry or not foundState or not foundPostalCode or not foundAddressLine or not foundCity:
-        st.warning("Could not automatically fix swapped columns. Please ensure the spreadsheet is formatted correctly.")
-        st.info(f"After attempting to fix swapped columns, the following data was found: Address line:{foundAddressLine}, City: {foundCity}, State: {foundState}, Postal code: {foundPostalCode}, Country: {foundCountry}")
-        return None
-    else: 
+    if foundCountry and foundState and foundPostalCode and foundAddressLine and foundCity:
         address = {
             'country': foundCountry,
             'state': foundState,
@@ -538,10 +571,10 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
             'confidenceError': confidenceError
         }
         return address
-    return None
-        
-
-#Main program
+    else:
+        st.warning("Could not automatically fix swapped columns. Please ensure the spreadsheet is formatted correctly.")
+        st.info(f"After attempting to fix swapped columns, the following data was found: Address line:{foundAddressLine}, City: {foundCity}, State: {foundState}, Postal code: {foundPostalCode}, Country: {foundCountry}")
+        return None
 
 
 # Streamlit UI
@@ -555,22 +588,25 @@ if uploadedFile:
         sheet = op.load_workbook(uploadedFile).active
         valid = 0
         invalid = 0
+        # Iterate through the rows of the spreadsheet and validate each address
         for row in sheet.iter_rows(values_only=True, min_row=2): #min_row=2 to skip header
-            #recordId, addressLine, City, State, postal_code, country
+            #skip empty rows
             if row is None or all(cell is None for cell in row):
                 continue
+            # Grab columns from the row
             addressLine = (row[1])
             state = (row[3])
             city = (row[2])
             postalCode = ((row[4]))
             country = ((row[5]))
-            streetAddress = validateStreetType(abbreviateAddress(addressLine))
+
+            #Assign columns to dict
             address = {
                 'country': country,
                 'state': state,
                 'city': city,
                 'postalCode': postalCode,
-                'streetAddress': streetAddress
+                'streetAddress': addressLine
             }
             validateResult = validateAddress(address)
             if isinstance(validateResult, dict):
