@@ -25,21 +25,24 @@ def validateState(country, state):
             return subdivision.code.split('-')[1]
     return False
 
-def formatString(string):
+def formatString(string, removeAccents=True, removePunctuation=True):
     if not string:
         return None
 
     string = str(string).strip()
 
-    # Convert accented characters to their base characters
-    string = unicodedata.normalize('NFKD', string)
-    string = ''.join(
-        c for c in string
-        if not unicodedata.combining(c)
-    )
-
-    # Remove punctuation
-    string = re.sub(r'[^\w\s]', '', string)
+    if removeAccents:
+        # Convert accented characters to their base characters
+        string = unicodedata.normalize('NFKD', string)
+        string = ''.join(
+            c for c in string
+            if not unicodedata.combining(c)
+        )
+    if removePunctuation:
+        #replace ' and similar marks with a space,
+        string = re.sub(r'[\'\"`´]', ' ', string)
+        # Remove punctuation
+        string = re.sub(r'[^\w\s]', '', string)
 
     # Replace multiple spaces with a single space
     string = re.sub(r'\s+', ' ', string)
@@ -158,33 +161,29 @@ def getState(stateName, countryCode, argumentType='name'):
     try:
         stateName = formatString(str(stateName).strip())
         subdivisions = pycountry.subdivisions.get(country_code=countryCode)
-        #subdivisionNames = [subdivision.name for subdivision in subdivisions]
-        for subdivision in subdivisions:
-            
-            #Word match
-            if stateName.lower() in subdivision.name.lower():
-                if argumentType == 'name':
-                    return subdivision.name
-                return subdivision.code.split('-')[1]
-            #Allow for minor misspellings using difflib
-            elif difflib.SequenceMatcher(None, subdivision.name.lower(), stateName.lower()).ratio() > 0.85:
-                if argumentType == 'name':
-                    return subdivision.name
-                return subdivision.code.split('-')[1]
-            
-            #Code match
-            elif stateName.lower() in subdivision.code.split('-')[1].lower():
-                if argumentType == 'name':
-                    return subdivision.name
-                return subdivision.code.split('-')[1]
-            elif difflib.SequenceMatcher(None, subdivision.code.split('-')[1].lower(), stateName.lower()).ratio() > 0.85:
-                if argumentType == 'name':
-                    return subdivision.name
-                return subdivision.code.split('-')[1]
+        subdivisionNames = [subdivision.name for subdivision in subdivisions]
+        subdivisionCodes = [subdivision.code.split('-')[1] for subdivision in subdivisions]
+        #use difflib to find the closest match for the state name or code, allowing for minor misspellings
+        closestName = difflib.get_close_matches(stateName, subdivisionNames, n=1, cutoff=0.8)
+        closestCode = difflib.get_close_matches(stateName, subdivisionCodes, n=1, cutoff=0.8)
+        if closestName:
+            closestSubdivision = next(subdivision for subdivision in subdivisions if subdivision.name == closestName[0])
+            return closestSubdivision.code.split('-')[1] if argumentType == 'code' else closestSubdivision.name
+        elif closestCode:
+            closestSubdivision = next(subdivision for subdivision in subdivisions if subdivision.code.split('-')[1] == closestCode[0])
+            return closestSubdivision.code.split('-')[1] if argumentType == 'code' else closestSubdivision.name
+        else:
+            for sn in subdivisionNames:
+                if stateName.lower() in sn.lower():
+                    closestSubdivision = next(subdivision for subdivision in subdivisions if subdivision.name == sn)
+                    return closestSubdivision.code.split('-')[1] if argumentType == 'code' else closestSubdivision.name
+                elif formatString(stateName.lower()) in formatString(sn.lower()):
+                    closestSubdivision = next(subdivision for subdivision in subdivisions if subdivision.name == sn)
+                    return closestSubdivision.code.split('-')[1] if argumentType == 'code' else closestSubdivision.name
+            return None
     except Exception as e:
-        st.warning(f"An error occurred while validating state: {str(e)}")
+        st.warning(f"An error occurred while validating state/province: {str(e)}")
         return None
-
 
 def abbreviateAddress(address):
     # shorten things like south, north, east, west to S, N, E, W
@@ -462,7 +461,8 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
     foundPostalCode = None
     foundAddressLine = None
     foundCity = None
-    confidence = 1
+    confidenceError = []
+    unclaimed = []
     
     tempList = [addressLineCol, cityCol, stateCol, postalCodeCol, countryRowCol]
     for i in range(len(tempList)):
@@ -474,27 +474,55 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
             break
             
     for j in range(len(tempList)):
-        test = formatString(str(tempList[j]).strip())
+        test = formatString(str(tempList[j]).strip(), removeAccents=True, removePunctuation=False)
+        unclaimed.append(test)
         testState = getState(test, foundCountry, "name")
         #st.info(f"Testing {test} for state with country {foundCountry}. Result: {testState}")
         testStreet = validateStreetType(abbreviateAddress(test))
         if testState:
             foundState = testState
-        elif testStreet:
+            try:
+                unclaimed.remove(test)
+            except ValueError:                
+                pass
+            
+        if testStreet:
+            try:
+                confidenceError.remove("street address")
+            except ValueError:
+                pass
             foundAddressLine = testStreet
+            try:
+                unclaimed.remove(test)
+            except ValueError:                
+                pass
         #Check if 30 characters or shorter and contains no spaces and digits, it's likely a city name
-        elif len(test) <= 30 and not any(char.isdigit() for char in test) and " " not in test:
+        if len(test) <= 30 and not any(char.isdigit() for char in test) and " " not in test.strip():
             foundCity = test
-            confidence =0
+            confidenceError.append("city")
+            try:
+                unclaimed.remove(test)
+            except ValueError:                
+                pass
         #Check if 9 digits or shorter and contains digits, it's likely a postal code
-        elif len(test) <= 9 and any(char.isdigit() for char in test):
+        if len(test) <= 9 and any(char.isdigit() for char in test):
             foundPostalCode = normalizePostalCode(test, foundCountry)
+            try:
+                unclaimed.remove(test)
+            except ValueError:                
+                pass
+
         #If it contains spaces and digits and is longer than 8 characters, it's likely an address line
-        elif len(test) > 8 and any(char.isdigit() for char in test) and " " in test:
+        if len(test) > 8 and any(char.isdigit() for char in test) and " " in test:
             foundAddressLine = test
-            confidence = 0
-        elif foundCountry and foundState and foundPostalCode and foundAddressLine:
-            foundCity = test
+            confidenceError.append("address line")
+            try:
+                unclaimed.remove(test)
+            except ValueError:                
+                pass
+        if foundCountry and foundState and foundPostalCode and foundAddressLine and len(unclaimed) == 1:
+            foundCity = unclaimed[0]
+            confidenceError.append("city")
             
     if not foundCountry or not foundState or not foundPostalCode or not foundAddressLine or not foundCity:
         st.warning("Could not automatically fix swapped columns. Please ensure the spreadsheet is formatted correctly.")
@@ -507,7 +535,7 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
             'postalCode': foundPostalCode,
             'streetAddress': foundAddressLine,
             'city': foundCity,
-            'confidence': confidence
+            'confidenceError': confidenceError
         }
         return address
     return None
@@ -534,8 +562,8 @@ if uploadedFile:
             addressLine = (row[1])
             state = (row[3])
             city = (row[2])
-            postalCode = (row[4])
-            country = (row[5])
+            postalCode = ((row[4]))
+            country = ((row[5]))
             streetAddress = validateStreetType(abbreviateAddress(addressLine))
             address = {
                 'country': country,
@@ -554,7 +582,7 @@ if uploadedFile:
                     newResult = validateAddress(tryFix)
                     if isinstance(newResult, dict):
                         valid += 1
-                        st.write(f"{address} is invalid. However, after attempting to fix swapped columns, {tryFix['streetAddress']}, {tryFix['state']}, {tryFix['postalCode']}, {tryFix['country']} is valid. Confidence level of fix: {tryFix['confidence']}")
+                        st.write(f"{address} was invalid because {validateResult}. However, after attempting to fix swapped columns, {tryFix['streetAddress']},{tryFix['city']} {tryFix['state']}, {tryFix['postalCode']}, {tryFix['country']} is valid. Confidence warnings of fix: {tryFix['confidenceError']}")
                     else:
                         invalid += 1
                         st.write(f"{address} is invalid. Reason: {validateResult}. Also attempted to fix swapped columns, but it still failed validation. Reason: {newResult}")
@@ -563,7 +591,5 @@ if uploadedFile:
                     st.write(f"{address}is invalid. Reason: {validateResult}")
 
     st.success(f"Validation complete! Valid addresses: {valid}, Invalid addresses: {invalid}")
-    #States of england
-    for subdivision in pycountry.subdivisions.get(country_code='FR'):
-        st.write(subdivision.name)
+
 
