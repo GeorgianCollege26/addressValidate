@@ -705,13 +705,17 @@ def refreshPage(function):
 # Streamlit UI
 st.title("Address Validator")
 
-# if 'validList' in st.session_state:
-#     #button to show valid and invalid lists
-#     if st.button("Show valid and invalid addresses"):
-#         displayResults(st.session_state.validList, st.session_state.invalidList)
+if 'validList' in st.session_state:
+    #button to show valid and invalid lists
+    if st.button("Show valid and invalid addresses"):
+        displayResults(st.session_state.validList, st.session_state.invalidList)
 
 
 uploadedFile = st.file_uploader("Upload a spreadsheet with addresses", type=["xlsx"])
+if st.session_state.get('validList') and st.session_state.get('invalidList'):
+    if st.button("Refresh results"):
+        refreshPage(lambda: displayResults(st.session_state.validList, st.session_state.invalidList))
+        
 if st.button("Validate") and uploadedFile:
     # Process the uploaded file and validate addresses
     with st.spinner("Processing"):
@@ -764,16 +768,15 @@ if st.button("Validate") and uploadedFile:
                     invalidList.append(address)
                     ##st.error(f"{address}is invalid. Reason: {validateResult}")
 
+    # Update session state with results
+    st.session_state.validList = validList
+    st.session_state.invalidList = invalidList
+
     # After processing all addresses, display results
-    st.success(f"Validation complete! Valid addresses: {len(validList)}, Invalid addresses: {len(invalidList)}")
-    
-    #button to show valid and invalid lists
-    if st.button("Show valid and invalid addresses"):
-        displayResults(validList, invalidList)  
-    # button to download valid and invalid lists as excel files
-    if st.checkbox("Download results as Excel files"):
-        saveResults(validList, invalidList)
-        st.success("Results saved as valid_addresses.xlsx and invalid_addresses.xlsx")
+    st.success(f"Validation complete! Valid addresses: {len(st.session_state.validList)}, Invalid addresses: {len(st.session_state.invalidList)}")
+    displayResults(st.session_state.validList, st.session_state.invalidList)  
+    saveResults(st.session_state.validList, st.session_state.invalidList)
+    st.success("Results saved as valid_addresses.xlsx and invalid_addresses.xlsx")
    
 
 
