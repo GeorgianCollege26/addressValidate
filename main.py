@@ -6,6 +6,7 @@ import pycountry
 import difflib
 import openpyxl as op
 import unicodedata
+import time
 
 
 def validateState(country, state):
@@ -25,7 +26,7 @@ def validateState(country, state):
             return subdivision.code.split('-')[1]
     return False
 
-def formatString(string, removeAccents=True, removePunctuation=True, toUpper=False, leaveApostrophes=False):
+def formatString(string, removeAccents=True, removePunctuation=True, toUpper=False, leaveApostrophes=False, removeSpaces=False):
     if not string:
         return None
 
@@ -50,9 +51,14 @@ def formatString(string, removeAccents=True, removePunctuation=True, toUpper=Fal
     # Replace multiple spaces with a single space
     string = re.sub(r'\s+', ' ', string)
 
+    if removeSpaces:
+        string = string.replace(" ", "")
+
     return string.upper() if toUpper else string
 
 def validatePostalCode(country, postalCode):
+    #format the postal code by removing accents and punctuation, and converting to uppercase, to improve regex matching
+    postalCode = formatString(postalCode, toUpper=True)
     # Define regex patterns for postal codes based on country
     PSPatterns = {
         'US': r'^\d{5}(-\d{4})?$',  # 5 digits or 5 digits + 4 digits for US' building specifiers (less used)
@@ -73,10 +79,13 @@ def validatePostalCode(country, postalCode):
     if pattern and matchCode:
         return matchCode.group(0)
     elif pattern and matchCode2:
-        return matchCode2
+        return matchCode2.group(0)
     return False
 
 def normalizePostalCode(postalCode, country):
+    if not postalCode or not country:
+        return postalCode
+    postalCode = formatString(postalCode, toUpper=True)
     # Use regex to insert the space in the correct position
     patterns = {
         'CA': r'^([A-Za-z]\d[A-Za-z])\s?(\d[A-Za-z]\d)$',  # Canada
@@ -85,55 +94,90 @@ def normalizePostalCode(postalCode, country):
     }
     pattern = patterns.get(country)
     if not pattern:
-        return postalCode  # Return as-is if no specific pattern for the country
+        #change all Os to 0s and all Is to 1s
+        pattern = r'^[A-Za-z0-9]+$'
     match = re.match(pattern, postalCode)
     if match:
-        return f"{match.group(1)} {match.group(2)}"
+        # If there are mutiple groups, join them with a space
+        if len(match.groups()) > 1:
+            return ' '.join(match.groups())
+        else:
+            return match.group(0)
     else:
-        # If it doesn't match the pattern, return as-is or raise an error
-        return postalCode
+        if country == 'CA':
+            postalCode = formatString(postalCode, toUpper=True, removePunctuation=True)
+            for i in range(len(postalCode)):
+                if i == 1 or i == 4 or i == 6:
+                    char = postalCode[i]
+                    if char == 'O':
+                        postalCode = postalCode.replace('O', '0')
+                    elif char == 'I':
+                        postalCode = postalCode.replace('I', '1')
+                elif i == 0 or i == 2 or i == 5:
+                    char = postalCode[i]
+                    if char == '0':
+                        postalCode = postalCode.replace('0', 'O')
+                    elif char == '1':
+                        postalCode = postalCode.replace('1', 'I')
+            return postalCode
+        else:
+            return postalCode
 
 
 def validateAddress(address):
     # If no address is provided, return an error message
     if not address:
         return "No address provided."
+    errorFields = []
     
     # If any of the required fields are missing, return an error message specifying which field is missing
-    for field in ['country', 'state', 'city', 'postalCode', 'streetAddress']:
+    for field in ['country', 'state', 'city', 'postalCode', 'streetAddress', 'recordId']:
         if address.get(field) == None or str(address.get(field)).strip().lower() == "none":
-            return f"{field} is required."
+            errorFields.append(f"{field} is required.")
+    if errorFields:
+        return errorFields.insert(0, "missing")
 
     try:
         # Give address as a dictionary with keys: country, state, postal_code, street_type
         try:
-            country = pycountry.countries.lookup(address.get('country')) if address.get('country') else None
+            country = pycountry.countries.lookup(formatString(address.get('country'), removeAccents=False, leaveApostrophes=True)) if address.get('country') else None
         except LookupError:
             try:
                 countryCode = getCountryCode(address.get('country'))
                 country = pycountry.countries.get(alpha_2=countryCode) if countryCode else None
             except LookupError:
-                return f"Invalid country: {address.get('country')}"
+                errorFields.append(f"Invalid country: {address.get('country')}")
+            if not country:
+                try:
+                    countryNames = [country.name for country in pycountry.countries]
+                    closestCountry = difflib.get_close_matches(formatString(address.get('country'), removeAccents=False, leaveApostrophes=True), countryNames, n=1, cutoff=0.8)
+                    country = pycountry.countries.get(name=closestCountry[0]) if closestCountry else None
+                except Exception as e:
+                    errorFields.append(f"Invalid country: {address.get('country')}")
+                
         countryCode = country.alpha_2 if country else None
         countryName = country.name.upper() if country else None
         if not country:
-            return f"Invalid country: {address.get('country')}"
+            errorFields.append(f"Invalid country: {address.get('country')}")
         state = address.get('state')
         if not state:
-            return "State/Province is required."
+            errorFields.append("State/Province is required.")
         
         stateCode = getState(state, countryCode, "code") if address.get('state') else None
         stateName = getState(state, countryCode, "name") if address.get('state') else None
 
         city = address.get('city')
         if not city:
-            return "City is required."
+            errorFields.append("City is required.")
         postalCode = address.get('postalCode')
         if not postalCode:
-            return "Postal code is required."
+            errorFields.append("Postal code is required.")
         streetAddress = address.get('streetAddress')
         if not streetAddress:
-            return "Street address is required."
+            errorFields.append("Street address is required.")
+        
+        if errorFields:
+            return errorFields
         
         streetValid = validateStreetType(abbreviateAddress(streetAddress))
         stateValid = validateState(countryCode, stateCode)
@@ -149,6 +193,9 @@ def validateAddress(address):
             return "Street type could not be determined from the address."
         if streetValid[0] == None:
             return "Street type could not be determined from the address."
+        
+        if errorFields:
+            return errorFields
 
         # If all validations pass, return the validated address as a dictionary
         # but return state codes instead of names for US and Canada, as they are more commonly used in addresses
@@ -159,9 +206,10 @@ def validateAddress(address):
             'state': stateName.upper() if stateName else None,
             'postalCode': formatString(postalCodeValid, toUpper=True, removeAccents=True, leaveApostrophes=True),
             'streetAddress': formatString(streetValid, toUpper=True, removeAccents=True, leaveApostrophes=True),
-            'city': formatString(city, toUpper=True, removeAccents=True, leaveApostrophes=True)
+            'city': formatString(city, toUpper=True, removeAccents=True, leaveApostrophes=True),
+            'recordId': str(address.get('recordId'))
         }
-        st.success(f"{validatedAddress['streetAddress']}, {validatedAddress['city']} {validatedAddress['state']}, {validatedAddress['postalCode']}, {validatedAddress['country']} is valid.")
+        ##st.success(f"{validatedAddress['streetAddress']}, {validatedAddress['city']} {validatedAddress['state']}, {validatedAddress['postalCode']}, {validatedAddress['country']} is valid.")
         return validatedAddress
     except Exception as e:
         return f"An error occurred during validation: {str(e)}"
@@ -482,8 +530,8 @@ def validateStreetType(address):
     #st.warning(formatString(address) + " | does not contain a valid street type.")
     return None
 
-def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowCol):
-    st.info(f"Attempting to fix swapped columns for the following data: {addressLineCol}, {cityCol}, {stateCol}, {postalCodeCol}, {countryRowCol}")
+def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowCol, addressID):
+    ##st.info(f"Attempting to fix swapped columns for the following data: {addressLineCol}, {cityCol}, {stateCol}, {postalCodeCol}, {countryRowCol}")
     foundCountry = None
     foundState = None
     foundPostalCode = None
@@ -517,7 +565,6 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
                     confidenceError.append("city")
             try:
                 unclaimed.remove(currentCol)
-                colList.remove(foundState)
             except ValueError:                
                 pass
 
@@ -530,7 +577,6 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
             foundAddressLine = testStreet
             try:
                 unclaimed.remove(currentCol)
-                colList.remove(testStreet)
             except ValueError:                
                 pass
 
@@ -568,26 +614,112 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
             'postalCode': foundPostalCode,
             'streetAddress': foundAddressLine,
             'city': foundCity,
-            'confidenceError': confidenceError
+            'confidenceError': confidenceError,
+            'recordId': str(addressID)
         }
         return address
     else:
         st.warning("Could not automatically fix swapped columns. Please ensure the spreadsheet is formatted correctly.")
         st.info(f"After attempting to fix swapped columns, the following data was found: Address line:{foundAddressLine}, City: {foundCity}, State: {foundState}, Postal code: {foundPostalCode}, Country: {foundCountry}")
         return None
+    
+def displayResults(validList, invalidList): 
+    for valid in validList:
+        st.write(f"{valid['recordId']} : {valid['streetAddress']}, {valid['city']} {valid['state']}, {valid['postalCode']}, {valid['country']} is valid.")
+    for invalid in invalidList:
+        st.error(f"{invalid['recordId']} : {invalid['streetAddress']}, {invalid['city']} {invalid['state']}, {invalid['postalCode']}, {invalid['country']} is invalid.")
+    
+    # for invalid in enumerate(invalidList):
+    #     invalid = invalid[1]
+    #     #let user press button to manually edit the address and attempt to validate again or mark as valid
+    #     st.error(f"{invalid} is invalid.")
+    #     with st.expander(f"Attempt to fix [{invalid['recordId']}] {invalid['streetAddress']}, {invalid['city']} {invalid['state']}, {invalid['postalCode']}, {invalid['country']}"):
+    #         addressId = st.text_input("Record ID", value=invalid['recordId'] if invalid.get('recordId') else f"invalid_{invalidList.index(invalid)}", key=f"invalid_{invalidList.index(invalid)}", disabled=True if invalid.get('recordId') else False)
+    #         newAddressLine = st.text_input("Street address", value=invalid['streetAddress'], key=f"address_{addressId}")
+    #         newCity = st.text_input("City", value=invalid['city'], key=f"city{addressId}")
+    #         newState = st.text_input("State/Province", value=invalid['state'], key=f"state{addressId}")
+    #         newPostalCode = st.text_input("Postal code", value=invalid['postalCode'], key=f"postalCode{addressId}")
+    #         newCountry = st.text_input("Country", value=invalid['country'], key=f"country{addressId}")
+    #         overwrite = st.checkbox("Mark as valid without fixing", value=False, key=f"overwrite{addressId}")
 
+    #         if overwrite:
+    #             validList.append(invalid)
+    #             st.success(f"{invalid} has been marked as valid without changes.")
+    #             #remove from invalid list
+    #             invalidList.remove(invalid)
+
+    #         if st.button(f"Validate edited address for {invalid}"):
+    #             editedAddress = {
+    #                 'country': newCountry,
+    #                 'state': newState,
+    #                 'city': newCity,
+    #                 'postalCode': newPostalCode,
+    #                 'streetAddress': newAddressLine,
+    #                 'recordId': str(addressId)
+    #             }
+    #             validateResult = validateAddress(editedAddress)
+    #             if isinstance(validateResult, dict):
+    #                 validList.append(validateResult)
+    #                 st.success(f"{editedAddress} is valid after manual edit.")
+    #                 #remove from invalid list
+    #                 invalidList.remove(invalid)
+    #             else:
+    #                 st.error(f"{editedAddress} is still invalid after manual edit. Reason: {validateResult}")
+    
+    # if st.button("Refresh results"):
+    #     st.session_state.validList = validList
+    #     st.session_state.invalidList = invalidList
+    #     refreshPage(lambda: displayResults(st.session_state.validList, st.session_state.invalidList))
+
+
+def saveResults(validList, invalidList):
+
+    for valid in validList:
+        #Save valid to excel file
+        file = op.Workbook()
+        sheet = file.active
+        sheet.append(["Record ID", "Street Address", "City", "State/Province", "Postal Code", "Country"])
+        for valid in validList:
+            sheet.append([valid['recordId'], valid['streetAddress'], valid['city'], valid['state'], valid['postalCode'], valid['country']])
+        file.save("valid_addresses.xlsx")
+
+    for invalid in invalidList:
+        #save invalid to excel file
+        file = op.Workbook()
+        sheet = file.active
+        sheet.append(["Record ID", "Street Address", "City", "State/Province", "Postal Code", "Country"])
+        for invalid in invalidList:
+            sheet.append([invalid['recordId'], invalid['streetAddress'], invalid['city'], invalid['state'], invalid['postalCode'], invalid['country']])
+        file.save("invalid_addresses.xlsx")
+
+    
+    
+def refreshPage(function):
+    for key in list(st.session_state.keys()):
+        if key.startswith(("address_", "city_", "state_", "postal_", "country_", "overwrite_")):
+            del st.session_state[key]
+    st.rerun()
+    function()
+    
 
 # Streamlit UI
 st.title("Address Validator")
+
+# if 'validList' in st.session_state:
+#     #button to show valid and invalid lists
+#     if st.button("Show valid and invalid addresses"):
+#         displayResults(st.session_state.validList, st.session_state.invalidList)
+
+
 uploadedFile = st.file_uploader("Upload a spreadsheet with addresses", type=["xlsx"])
-if uploadedFile:
+if st.button("Validate") and uploadedFile:
     # Process the uploaded file and validate addresses
     with st.spinner("Processing"):
         # Read the Excel file using pandas
         # Excel rows: record id, Address line 1, City, Province/State, Postal Code, Country
         sheet = op.load_workbook(uploadedFile).active
-        valid = 0
-        invalid = 0
+        validList = []
+        invalidList = []
         # Iterate through the rows of the spreadsheet and validate each address
         for row in sheet.iter_rows(values_only=True, min_row=2): #min_row=2 to skip header
             #skip empty rows
@@ -598,7 +730,8 @@ if uploadedFile:
             state = (row[3])
             city = (row[2])
             postalCode = ((row[4]))
-            country = ((row[5]))
+            country = row[5]
+            addressId = row[0]
 
             #Assign columns to dict
             address = {
@@ -606,26 +739,41 @@ if uploadedFile:
                 'state': state,
                 'city': city,
                 'postalCode': postalCode,
-                'streetAddress': addressLine
+                'streetAddress': addressLine,
+                'recordId': addressId
             }
             validateResult = validateAddress(address)
             if isinstance(validateResult, dict):
-                valid += 1
-                #st.write(f"{streetAddress} {streetType}, {state}, {postalCode}, {country} is valid.")
+                validList.append(validateResult)
+                ##st.write(f"{streetAddress} {streetType}, {state}, {postalCode}, {country} is valid.")
             else:
-                tryFix = fixSwappedCols(addressLine, city, state, postalCode, country)
+                tryFix = None
+                if isinstance(validateResult, list) and "missing" in validateResult:
+                    pass
+                elif isinstance(validateResult, list): # and len(validateResult) == 1:
+                    tryFix = fixSwappedCols(addressLine, city, state, postalCode, country, addressId)
                 if tryFix:
                     newResult = validateAddress(tryFix)
                     if isinstance(newResult, dict):
-                        valid += 1
-                        st.write(f"{address} was invalid because {validateResult}. However, after attempting to fix swapped columns, {tryFix['streetAddress']},{tryFix['city']} {tryFix['state']}, {tryFix['postalCode']}, {tryFix['country']} is valid. Confidence warnings of fix: {tryFix['confidenceError']}")
+                        validList.append(newResult)
+                        ##st.write(f"{address} was invalid because {validateResult}. However, after attempting to fix swapped columns, {tryFix['streetAddress']},{tryFix['city']} {tryFix['state']}, {tryFix['postalCode']}, {tryFix['country']} is valid. Confidence warnings of fix: {tryFix['confidenceError']}")
                     else:
-                        invalid += 1
-                        st.write(f"{address} is invalid. Reason: {validateResult}. Also attempted to fix swapped columns, but it still failed validation. Reason: {newResult}")
+                        invalidList.append(address)
+                        ##st.error(f"{address} is invalid. Reason: {validateResult}. Also attempted to fix swapped columns, but it still failed validation. Reason: {newResult}")
                 else:
-                    invalid += 1
-                    st.write(f"{address}is invalid. Reason: {validateResult}")
+                    invalidList.append(address)
+                    ##st.error(f"{address}is invalid. Reason: {validateResult}")
 
-    st.success(f"Validation complete! Valid addresses: {valid}, Invalid addresses: {invalid}")
+    # After processing all addresses, display results
+    st.success(f"Validation complete! Valid addresses: {len(validList)}, Invalid addresses: {len(invalidList)}")
+    
+    #button to show valid and invalid lists
+    if st.button("Show valid and invalid addresses"):
+        displayResults(validList, invalidList)  
+    # button to download valid and invalid lists as excel files
+    if st.checkbox("Download results as Excel files"):
+        saveResults(validList, invalidList)
+        st.success("Results saved as valid_addresses.xlsx and invalid_addresses.xlsx")
+   
 
 
