@@ -639,6 +639,24 @@ def displayResults(validList, invalidList):
                 if invalid.get('confidenceError'):
                     st.warning(f"Confidence warnings for this address: {', '.join(invalid['confidenceError'])}")
 
+                # Let user edit the fields
+                for col in ['recordId', 'streetAddress', 'city', 'state', 'postalCode', 'country']:
+                    if invalid.get(col):
+                        invalid[col] = st.text_input(f"Edit {col}", value=str(invalid[col]), key=f"{col}_{invalid['recordId']}")
+                    else:
+                        invalid[col] = st.text_input(f"Edit {col}", value="", key=f"{col}_{invalid['recordId']}")
+
+                # Button to test
+                if st.button("Test changes", key=f"test_{invalid['recordId']}"):
+                    testResult = validateAddress(invalid)
+                    if isinstance(testResult, dict):
+                        st.success(f"After changes, address is now valid: {testResult['streetAddress']}, {testResult['city']} {testResult['state']}, {testResult['postalCode']}, {testResult['country']}. Moving to valid list...")
+                        st.session_state.validList.append(testResult)
+                        st.session_state.invalidList.remove(invalid)
+                        
+                        time.sleep(2)
+                        st.rerun()
+
                 # Manually marking as valid
                 if st.button("Mark as valid", key=f"valid_{invalid['recordId']}"):
                     for col in ['streetAddress', 'city', 'state', 'country', 'postalCode']:
@@ -650,9 +668,10 @@ def displayResults(validList, invalidList):
                             invalid[col] = re.sub(r'\[.*?\]|\(.*?\)', '', str(invalid[col])).title()
                     st.session_state.validList.append(invalid)
                     st.session_state.invalidList.remove(invalid)
-                    st.success(f"Address {invalid['recordId']} marked as valid.")
+                    st.success(f"Address {invalid['recordId']} marked as valid. Moving...")
+                    time.sleep(2)
                     st.rerun()
-            st.error(f"{invalid['recordId']} : {invalid['streetAddress']}, {invalid['city']} {invalid['state']}, {invalid['postalCode']}, {invalid['country']} is invalid.")
+            #st.error(f"{invalid['recordId']} : {invalid['streetAddress']}, {invalid['city']} {invalid['state']}, {invalid['postalCode']}, {invalid['country']} is invalid.")
     
 
 def saveResults(validList, invalidList):
