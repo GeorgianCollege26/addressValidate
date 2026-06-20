@@ -705,78 +705,89 @@ def refreshPage(function):
 # Streamlit UI
 st.title("Address Validator")
 
-if 'validList' in st.session_state:
-    #button to show valid and invalid lists
-    if st.button("Show valid and invalid addresses"):
-        displayResults(st.session_state.validList, st.session_state.invalidList)
-
 
 uploadedFile = st.file_uploader("Upload a spreadsheet with addresses", type=["xlsx"])
-if st.session_state.get('validList') and st.session_state.get('invalidList'):
-    if st.button("Refresh results"):
-        refreshPage(lambda: displayResults(st.session_state.validList, st.session_state.invalidList))
-        
-if st.button("Validate") and uploadedFile:
-    # Process the uploaded file and validate addresses
-    with st.spinner("Processing"):
-        # Read the Excel file using pandas
-        # Excel rows: record id, Address line 1, City, Province/State, Postal Code, Country
-        sheet = op.load_workbook(uploadedFile).active
-        validList = []
-        invalidList = []
-        # Iterate through the rows of the spreadsheet and validate each address
-        for row in sheet.iter_rows(values_only=True, min_row=2): #min_row=2 to skip header
-            #skip empty rows
-            if row is None or all(cell is None for cell in row):
-                continue
-            # Grab columns from the row
-            addressLine = (row[1])
-            state = (row[3])
-            city = (row[2])
-            postalCode = ((row[4]))
-            country = row[5]
-            addressId = row[0]
 
-            #Assign columns to dict
-            address = {
-                'country': country,
-                'state': state,
-                'city': city,
-                'postalCode': postalCode,
-                'streetAddress': addressLine,
-                'recordId': addressId
-            }
-            validateResult = validateAddress(address)
-            if isinstance(validateResult, dict):
-                validList.append(validateResult)
-                ##st.write(f"{streetAddress} {streetType}, {state}, {postalCode}, {country} is valid.")
-            else:
-                tryFix = None
-                if isinstance(validateResult, list) and "missing" in validateResult:
-                    pass
-                elif isinstance(validateResult, list): # and len(validateResult) == 1:
-                    tryFix = fixSwappedCols(addressLine, city, state, postalCode, country, addressId)
-                if tryFix:
-                    newResult = validateAddress(tryFix)
-                    if isinstance(newResult, dict):
-                        validList.append(newResult)
-                        ##st.write(f"{address} was invalid because {validateResult}. However, after attempting to fix swapped columns, {tryFix['streetAddress']},{tryFix['city']} {tryFix['state']}, {tryFix['postalCode']}, {tryFix['country']} is valid. Confidence warnings of fix: {tryFix['confidenceError']}")
+col1, col2, col3, col4 = st.columns(4)
+
+with col1:
+    instructionBtn = st.button("Instructions")
+if instructionBtn:
+    st.info("To use this address validator, please upload an Excel spreadsheet (.xlsx) with the following columns: Record ID, Address line 1, City, Province/State, Postal Code, Country. The first row should contain the column headers. After uploading the file, click the 'Validate' button to process the addresses. The results will show which addresses are valid and which are invalid, along with reasons for any invalid addresses. You can also save the results to new Excel files for valid and invalid addresses.")
+
+
+if st.session_state.get('validList') and st.session_state.get('invalidList'):
+    with col4:
+        saveBtn = st.button("Save results to Excel")
+    if saveBtn:
+        saveResults(st.session_state.validList, st.session_state.invalidList)
+        st.success("Results saved as valid_addresses.xlsx and invalid_addresses.xlsx")
+
+    with col3:
+        displayBtn = st.button("Display results")
+    if displayBtn:
+        displayResults(st.session_state.validList, st.session_state.invalidList)
+
+with col2:
+    validateBtn = st.button("Validate") and uploadedFile
+    if validateBtn:
+        # Process the uploaded file and validate addresses
+        with st.spinner("Processing"):
+            # Read the Excel file using pandas
+            # Excel rows: record id, Address line 1, City, Province/State, Postal Code, Country
+            sheet = op.load_workbook(uploadedFile).active
+            validList = []
+            invalidList = []
+            # Iterate through the rows of the spreadsheet and validate each address
+            for row in sheet.iter_rows(values_only=True, min_row=2): #min_row=2 to skip header
+                #skip empty rows
+                if row is None or all(cell is None for cell in row):
+                    continue
+                # Grab columns from the row
+                addressLine = (row[1])
+                state = (row[3])
+                city = (row[2])
+                postalCode = ((row[4]))
+                country = row[5]
+                addressId = row[0]
+
+                #Assign columns to dict
+                address = {
+                    'country': country,
+                    'state': state,
+                    'city': city,
+                    'postalCode': postalCode,
+                    'streetAddress': addressLine,
+                    'recordId': addressId
+                }
+                validateResult = validateAddress(address)
+                if isinstance(validateResult, dict):
+                    validList.append(validateResult)
+                    ##st.write(f"{streetAddress} {streetType}, {state}, {postalCode}, {country} is valid.")
+                else:
+                    tryFix = None
+                    if isinstance(validateResult, list) and "missing" in validateResult:
+                        pass
+                    elif isinstance(validateResult, list): # and len(validateResult) == 1:
+                        tryFix = fixSwappedCols(addressLine, city, state, postalCode, country, addressId)
+                    if tryFix:
+                        newResult = validateAddress(tryFix)
+                        if isinstance(newResult, dict):
+                            validList.append(newResult)
+                            ##st.write(f"{address} was invalid because {validateResult}. However, after attempting to fix swapped columns, {tryFix['streetAddress']},{tryFix['city']} {tryFix['state']}, {tryFix['postalCode']}, {tryFix['country']} is valid. Confidence warnings of fix: {tryFix['confidenceError']}")
+                        else:
+                            invalidList.append(address)
+                            ##st.error(f"{address} is invalid. Reason: {validateResult}. Also attempted to fix swapped columns, but it still failed validation. Reason: {newResult}")
                     else:
                         invalidList.append(address)
-                        ##st.error(f"{address} is invalid. Reason: {validateResult}. Also attempted to fix swapped columns, but it still failed validation. Reason: {newResult}")
-                else:
-                    invalidList.append(address)
-                    ##st.error(f"{address}is invalid. Reason: {validateResult}")
+                        ##st.error(f"{address}is invalid. Reason: {validateResult}")
 
-    # Update session state with results
-    st.session_state.validList = validList
-    st.session_state.invalidList = invalidList
+        # Update session state with results
+        st.session_state.validList = validList
+        st.session_state.invalidList = invalidList
 
-    # After processing all addresses, display results
-    st.success(f"Validation complete! Valid addresses: {len(st.session_state.validList)}, Invalid addresses: {len(st.session_state.invalidList)}")
-    displayResults(st.session_state.validList, st.session_state.invalidList)  
-    saveResults(st.session_state.validList, st.session_state.invalidList)
-    st.success("Results saved as valid_addresses.xlsx and invalid_addresses.xlsx")
-   
+        # After processing all addresses, display results
+        st.success(f"Validation complete! Valid addresses: {len(st.session_state.validList)}, Invalid addresses: {len(st.session_state.invalidList)}")
+        st.rerun()
 
 
