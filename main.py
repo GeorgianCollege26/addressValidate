@@ -133,9 +133,11 @@ def validateAddress(address):
     # If any of the required fields are missing, return an error message specifying which field is missing
     for field in ['country', 'state', 'city', 'postalCode', 'streetAddress', 'recordId']:
         if address.get(field) == None or str(address.get(field)).strip().lower() == "none":
-            errorFields.append(f"{field} is required.")
+            errorFields.append(f"{field}")
     if errorFields:
-        return errorFields.insert(0, "missing")
+        errorFields.insert(0, "missing")
+        return errorFields
+
 
     try:
         # Give address as a dictionary with keys: country, state, postal_code, street_type
@@ -624,93 +626,141 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
         return None
     
 def displayResults(validList, invalidList): 
+    
+    editMode = st.checkbox("Show edit mode", value=False)
+
     col1, col2 = st.columns(2)
-   
     with col1:
         st.header("Valid addresses")
+        valCon = st.container(height=600)
         for valid in validList:
-            st.success(f"{valid['recordId']} : {valid['streetAddress']}, {valid['city']} {valid['state']}, {valid['postalCode']}, {valid['country']} is valid.")
+            if editMode:
+                with valCon.expander(f"{valid['recordId']} : {valid['streetAddress']}, {valid['city']} {valid['state']}, {valid['postalCode']}, {valid['country']}"):
+                    for col in ['recordId', 'streetAddress', 'city', 'state', 'postalCode', 'country']:
+                        if valid.get(col):
+                            valid[col] = st.text_input(f"Edit {col}", value=str(valid[col]), key=f"valid_{col}_{valid['recordId']}")
+                        else:
+                            valid[col] = st.text_input(f"Edit {col}", value="", key=f"valid_{col}_{valid['recordId']}")
+                    if st.button("Test changes", key=f"test_valid_{valid['recordId']}"):
+                        testResult = validateAddress(valid)
+                        if isinstance(testResult, dict):
+                            st.success(f"After changes, address is still valid: {testResult['streetAddress']}, {testResult['city']} {testResult['state']}, {testResult['postalCode']}, {testResult['country']}.")
+                            #update the valid list with the changes
+                            for i in range(len(st.session_state.validList)):
+                                if st.session_state.validList[i]['recordId'] == valid['recordId']:
+                                    st.session_state.validList[i] = testResult
+                        else:
+                            st.error(f"After changes, address is now invalid: {testResult}.)")
+                    if st.button("Mark as invalid", key=f"invalid_valid_{valid['recordId']}"):
+                        st.session_state.invalidList.append(valid)
+                        st.session_state.validList.remove(valid)
+                        st.success(f"Address {valid['recordId']} marked as invalid. Moving...")
+                        time.sleep(2)
+                        st.rerun()
+            else:
+                valCon.success(f"{valid['recordId']} : {valid['streetAddress']}, {valid['city']} {valid['state']}, {valid['postalCode']}, {valid['country']} is valid.")
    
     with col2:
         st.header("Invalid addresses")
 
+        invCon = st.container(height=600)
         for invalid in invalidList:
-            with st.expander(f"{invalid['recordId']} : {invalid['streetAddress']}, {invalid['city']} {invalid['state']}, {invalid['postalCode']}, {invalid['country']}"):
-                if invalid.get('confidenceError'):
-                    st.warning(f"Confidence warnings for this address: {', '.join(invalid['confidenceError'])}")
+            if editMode:
+                with invCon.expander(f"{invalid['recordId']} : {invalid['streetAddress']}, {invalid['city']} {invalid['state']}, {invalid['postalCode']}, {invalid['country']}"):
+                    if invalid.get('confidenceError'):
+                        st.warning(str(invalid['confidenceError']))
 
-                # Let user edit the fields
-                for col in ['recordId', 'streetAddress', 'city', 'state', 'postalCode', 'country']:
-                    if invalid.get(col):
-                        invalid[col] = st.text_input(f"Edit {col}", value=str(invalid[col]), key=f"{col}_{invalid['recordId']}")
-                    else:
-                        invalid[col] = st.text_input(f"Edit {col}", value="", key=f"{col}_{invalid['recordId']}")
-
-                # Button to test
-                if st.button("Test changes", key=f"test_{invalid['recordId']}"):
-                    testResult = validateAddress(invalid)
-                    if isinstance(testResult, dict):
-                        st.success(f"After changes, address is now valid: {testResult['streetAddress']}, {testResult['city']} {testResult['state']}, {testResult['postalCode']}, {testResult['country']}. Moving to valid list...")
-                        st.session_state.validList.append(testResult)
-                        st.session_state.invalidList.remove(invalid)
-                        
-                        time.sleep(2)
-                        st.rerun()
-
-                # Manually marking as valid
-                if st.button("Mark as valid", key=f"valid_{invalid['recordId']}"):
-                    for col in ['streetAddress', 'city', 'state', 'country', 'postalCode']:
+                    # Let user edit the fields
+                    for col in ['recordId', 'streetAddress', 'city', 'state', 'postalCode', 'country']:
                         if invalid.get(col):
-                            # Skip for state codes that are 2 letters, as they should be uppercase
-                            if col == 'state' and len(invalid['state']) == 2:
-                                continue
-                            # Remove [] and () and their contents from the string, and convert to title case
-                            invalid[col] = re.sub(r'\[.*?\]|\(.*?\)', '', str(invalid[col])).title()
-                    st.session_state.validList.append(invalid)
-                    st.session_state.invalidList.remove(invalid)
-                    st.success(f"Address {invalid['recordId']} marked as valid. Moving...")
-                    time.sleep(2)
-                    st.rerun()
-            #st.error(f"{invalid['recordId']} : {invalid['streetAddress']}, {invalid['city']} {invalid['state']}, {invalid['postalCode']}, {invalid['country']} is invalid.")
-    
+                            invalid[col] = st.text_input(f"Edit {col}", value=str(invalid[col]), key=f"{col}_{invalid['recordId']}")
+                        else:
+                            invalid[col] = st.text_input(f"Edit {col}", value="", key=f"{col}_{invalid['recordId']}")
+            
+                    # Button to test
+                    if st.button("Test changes", key=f"test_{invalid['recordId']}"):
+                        testResult = validateAddress(invalid)
+                        if isinstance(testResult, dict):
+                            st.success(f"After changes, address is now valid: {testResult['streetAddress']}, {testResult['city']} {testResult['state']}, {testResult['postalCode']}, {testResult['country']}. Moving to valid list...")
+                            st.session_state.validList.append(testResult)
+                            st.session_state.invalidList.remove(invalid)
+                            
+                            time.sleep(2)
+                            st.rerun()
+                        else:
+                            st.error(f"After changes, address is still invalid: {testResult}")
+
+                    # Manually marking as valid
+                    if st.button("Mark as valid", key=f"valid_{invalid['recordId']}"):
+                        for col in ['streetAddress', 'city', 'state', 'country']:
+                            if invalid.get(col):
+                                # Skip for state codes that are 2 letters, as they should be uppercase
+                                if (col == 'state' and len(invalid['state']) == 2) or col == 'postalCode':
+                                    continue
+                                # Remove [] and () and their contents from the string, and convert to title case
+                                invalid[col] = re.sub(r'\[.*?\]|\(.*?\)', '', str(invalid[col])).title()
+                        st.session_state.validList.append(invalid)
+                        st.session_state.invalidList.remove(invalid)
+                        st.success(f"Address {invalid['recordId']} marked as valid. Moving...")
+                        time.sleep(2)
+                        refreshPage()
+            else:
+                invCon.error(f"{invalid['recordId']} : {invalid['streetAddress']}, {invalid['city']} {invalid['state']}, {invalid['postalCode']}, {invalid['country']} is invalid.")
+
 
 def saveResults(validList, invalidList):
-
+    #Open file and load main sheet, set column widths, and add header row
+    file = op.Workbook()
+    sheet = file.active
+    sheet.column_dimensions['A'].width = 5
+    sheet.column_dimensions['B'].width = 22
+    sheet.column_dimensions['C'].width = 15
+    sheet.column_dimensions['D'].width = 15
+    sheet.column_dimensions['E'].width = 10
+    sheet.column_dimensions['F'].width = 15
+    sheet.append(["Record ID", "Street Address", "City", "State/Province", "Postal Code", "Country"])
+    
+    # Format and save to sheet
     for valid in validList:
-        #Save valid to excel file
-        file = op.Workbook()
-        sheet = file.active
-        sheet.append(["Record ID", "Street Address", "City", "State/Province", "Postal Code", "Country"])
-        for valid in validList:
-            # Make title case
-            for col in ['streetAddress', 'city', 'state', 'country']:
-                if valid.get(col):
-                    #Skip for state codes that are 2 letters, as they should be uppercase
-                    if col == 'state' and len(valid['state']) == 2:
-                        continue
-                    #remove [] and () and their contents from the string
-                    valid[col] = re.sub(r'\[.*?\]|\(.*?\)', '', valid[col]).title()
+        # Make title case and format strings
+        for col in ['streetAddress', 'city', 'state', 'country']:
+            if valid.get(col):
+                #Skip for state codes that are 2 letters, as they should be uppercase and postal Codes
+                if (col == 'state' and len(valid['state']) == 2) or col == 'postalCode':
+                    continue
+                #remove [] and () and their contents from the string
+                valid[col] = re.sub(r'\[.*?\]|\(.*?\)', '', valid[col]).title()
 
-            sheet.append([valid['recordId'], valid['streetAddress'], valid['city'], valid['state'] if len(str(valid['state'])) == 2 else valid['state'], valid['postalCode'].title(), valid['country']])
-        file.save("valid_addresses.xlsx")
+        sheet.append([valid['recordId'], valid['streetAddress'], valid['city'], valid['state'] if len(str(valid['state'])) == 2 else valid['state'], valid['postalCode'], valid['country']])
+        # Save the workbook to a file
+    file.save("valid_addresses.xlsx")
 
     for invalid in invalidList:
-        #save invalid to excel file
+        #Open file and load main sheet, set column widths, and add header row
         file = op.Workbook()
         sheet = file.active
+        sheet.column_dimensions['A'].width = 5
+        sheet.column_dimensions['B'].width = 22
+        sheet.column_dimensions['C'].width = 15
+        sheet.column_dimensions['D'].width = 15
+        sheet.column_dimensions['E'].width = 10
+        sheet.column_dimensions['F'].width = 15
         sheet.append(["Record ID", "Street Address", "City", "State/Province", "Postal Code", "Country"])
+
+        # Add each invalid address to the sheet without formatting, to preserve the original data for review
         for invalid in invalidList:
             sheet.append([invalid['recordId'], invalid['streetAddress'], invalid['city'], invalid['state'], invalid['postalCode'], invalid['country']])
+        # Save
         file.save("invalid_addresses.xlsx")
 
     
     
-def refreshPage(function):
+def refreshPage():
     for key in list(st.session_state.keys()):
-        if key.startswith(("address_", "city_", "state_", "postal_", "country_", "overwrite_")):
+        if key.startswith(("address_", "city_", "state_", "postal_", "country_", "overwrite_", "test_", "valid_", "invalid_", "recordId_")):
             del st.session_state[key]
     st.rerun()
-    function()
+    ()
     
 def mainPage():
     # Streamlit UI
@@ -724,7 +774,10 @@ def mainPage():
     with col1:
         instructionBtn = st.button("Instructions")
     if instructionBtn:
-        st.info("To use this address validator, please upload an Excel spreadsheet (.xlsx) with the following columns: Record ID, Address line 1, City, Province/State, Postal Code, Country. The first row should contain the column headers. After uploading the file, click the 'Validate' button to process the addresses. The results will show which addresses are valid and which are invalid, along with reasons for any invalid addresses. You can also save the results to new Excel files for valid and invalid addresses.")
+        st.warning("Upload an Excel spreadsheet (.xlsx) with the following columns: Record ID, Address line 1, City, Province/State, Postal Code, Country. The first row should contain the column headers.")
+        st.info("CLick upload and select a file matching above")
+        st.info("After uploading the file, click 'Validate' to process the addresses. ")
+        st.info("Once validation is complete, you can choose to view or save the results. ")
 
 
     if st.session_state.get('validList') and st.session_state.get('invalidList'):
@@ -769,7 +822,8 @@ def mainPage():
                     'city': city,
                     'postalCode': postalCode,
                     'streetAddress': addressLine,
-                    'recordId': addressId
+                    'recordId': addressId,
+                    'confidenceError': None
                 }
                 validateResult = validateAddress(address)
                 if isinstance(validateResult, dict):
@@ -778,7 +832,9 @@ def mainPage():
                 else:
                     tryFix = None
                     if isinstance(validateResult, list) and "missing" in validateResult:
-                        pass
+                        address['confidenceError'] = "Missing fields: " + ", ".join(validateResult[1:])#don't include the last element which is just "missing"
+                        invalidList.append(address)
+                        continue
                     elif isinstance(validateResult, list): # and len(validateResult) == 1:
                         tryFix = fixSwappedCols(addressLine, city, state, postalCode, country, addressId)
                     if tryFix:
@@ -787,9 +843,11 @@ def mainPage():
                             validList.append(newResult)
                             ##st.write(f"{address} was invalid because {validateResult}. However, after attempting to fix swapped columns, {tryFix['streetAddress']},{tryFix['city']} {tryFix['state']}, {tryFix['postalCode']}, {tryFix['country']} is valid. Confidence warnings of fix: {tryFix['confidenceError']}")
                         else:
+                            address['confidenceError'] = validateResult
                             invalidList.append(address)
                             ##st.error(f"{address} is invalid. Reason: {validateResult}. Also attempted to fix swapped columns, but it still failed validation. Reason: {newResult}")
                     else:
+                        address['confidenceError'] = validateResult
                         invalidList.append(address)
                         ##st.error(f"{address}is invalid. Reason: {validateResult}")
 
@@ -800,14 +858,21 @@ def mainPage():
         # After processing all addresses, display results
         st.success(f"Validation complete! Valid addresses: {len(st.session_state.validList)}, Invalid addresses: {len(st.session_state.invalidList)}")
         
-        if st.session_state.get('validList') and st.session_state.get('invalidList'):
-            if st.button("Confirm"):
-                st.rerun()
+        time.sleep(2)
+        st.rerun()
 
 def reviewPage():
     st.title("Review and Save Results")
+    if st.button("Instructions"):
+        st.info("This page displays the results of the address validation. Valid addresses are shown on the left, and invalid addresses are shown on the right. ")
+        st.info("You can edit invalid addresses and test them for validity. If an address is valid after editing, it will move to the valid list. You can also manually mark an address as valid. Once you are satisfied with the results, you can save them to Excel files.")
+        st.warning("Please note that marking an address as valid will save it as-is, it will not automatically fill blanks, be converted to a standardized format. It will only capitalize first letters..")
+        st.warning("Although it is possible to edit the id, it is not recommended as it may cause issues with the database. It is best to keep the record ID as-is.")
     if st.session_state.get('validList') and st.session_state.get('invalidList'):
         displayResults(st.session_state.validList, st.session_state.invalidList)
+        if st.button("Save results to Excel"):
+            saveResults(st.session_state.validList, st.session_state.invalidList)
+            st.success("Results saved as valid_addresses.xlsx and invalid_addresses.xlsx")
     else:
         st.info("No results to display. Please upload a file and validate addresses first.")
         if st.button("Go to Validator"):
