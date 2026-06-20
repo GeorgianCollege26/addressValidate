@@ -624,53 +624,36 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
         return None
     
 def displayResults(validList, invalidList): 
-    for valid in validList:
-        st.write(f"{valid['recordId']} : {valid['streetAddress']}, {valid['city']} {valid['state']}, {valid['postalCode']}, {valid['country']} is valid.")
-    for invalid in invalidList:
-        st.error(f"{invalid['recordId']} : {invalid['streetAddress']}, {invalid['city']} {invalid['state']}, {invalid['postalCode']}, {invalid['country']} is invalid.")
+    col1, col2 = st.columns(2)
+   
+    with col1:
+        st.header("Valid addresses")
+        for valid in validList:
+            st.success(f"{valid['recordId']} : {valid['streetAddress']}, {valid['city']} {valid['state']}, {valid['postalCode']}, {valid['country']} is valid.")
+   
+    with col2:
+        st.header("Invalid addresses")
+
+        for invalid in invalidList:
+            with st.expander(f"{invalid['recordId']} : {invalid['streetAddress']}, {invalid['city']} {invalid['state']}, {invalid['postalCode']}, {invalid['country']}"):
+                if invalid.get('confidenceError'):
+                    st.warning(f"Confidence warnings for this address: {', '.join(invalid['confidenceError'])}")
+
+                # Manually marking as valid
+                if st.button("Mark as valid", key=f"valid_{invalid['recordId']}"):
+                    for col in ['streetAddress', 'city', 'state', 'country', 'postalCode']:
+                        if invalid.get(col):
+                            # Skip for state codes that are 2 letters, as they should be uppercase
+                            if col == 'state' and len(invalid['state']) == 2:
+                                continue
+                            # Remove [] and () and their contents from the string, and convert to title case
+                            invalid[col] = re.sub(r'\[.*?\]|\(.*?\)', '', str(invalid[col])).title()
+                    st.session_state.validList.append(invalid)
+                    st.session_state.invalidList.remove(invalid)
+                    st.success(f"Address {invalid['recordId']} marked as valid.")
+                    st.rerun()
+            st.error(f"{invalid['recordId']} : {invalid['streetAddress']}, {invalid['city']} {invalid['state']}, {invalid['postalCode']}, {invalid['country']} is invalid.")
     
-    # for invalid in enumerate(invalidList):
-    #     invalid = invalid[1]
-    #     #let user press button to manually edit the address and attempt to validate again or mark as valid
-    #     st.error(f"{invalid} is invalid.")
-    #     with st.expander(f"Attempt to fix [{invalid['recordId']}] {invalid['streetAddress']}, {invalid['city']} {invalid['state']}, {invalid['postalCode']}, {invalid['country']}"):
-    #         addressId = st.text_input("Record ID", value=invalid['recordId'] if invalid.get('recordId') else f"invalid_{invalidList.index(invalid)}", key=f"invalid_{invalidList.index(invalid)}", disabled=True if invalid.get('recordId') else False)
-    #         newAddressLine = st.text_input("Street address", value=invalid['streetAddress'], key=f"address_{addressId}")
-    #         newCity = st.text_input("City", value=invalid['city'], key=f"city{addressId}")
-    #         newState = st.text_input("State/Province", value=invalid['state'], key=f"state{addressId}")
-    #         newPostalCode = st.text_input("Postal code", value=invalid['postalCode'], key=f"postalCode{addressId}")
-    #         newCountry = st.text_input("Country", value=invalid['country'], key=f"country{addressId}")
-    #         overwrite = st.checkbox("Mark as valid without fixing", value=False, key=f"overwrite{addressId}")
-
-    #         if overwrite:
-    #             validList.append(invalid)
-    #             st.success(f"{invalid} has been marked as valid without changes.")
-    #             #remove from invalid list
-    #             invalidList.remove(invalid)
-
-    #         if st.button(f"Validate edited address for {invalid}"):
-    #             editedAddress = {
-    #                 'country': newCountry,
-    #                 'state': newState,
-    #                 'city': newCity,
-    #                 'postalCode': newPostalCode,
-    #                 'streetAddress': newAddressLine,
-    #                 'recordId': str(addressId)
-    #             }
-    #             validateResult = validateAddress(editedAddress)
-    #             if isinstance(validateResult, dict):
-    #                 validList.append(validateResult)
-    #                 st.success(f"{editedAddress} is valid after manual edit.")
-    #                 #remove from invalid list
-    #                 invalidList.remove(invalid)
-    #             else:
-    #                 st.error(f"{editedAddress} is still invalid after manual edit. Reason: {validateResult}")
-    
-    # if st.button("Refresh results"):
-    #     st.session_state.validList = validList
-    #     st.session_state.invalidList = invalidList
-    #     refreshPage(lambda: displayResults(st.session_state.validList, st.session_state.invalidList))
-
 
 def saveResults(validList, invalidList):
 
@@ -680,7 +663,16 @@ def saveResults(validList, invalidList):
         sheet = file.active
         sheet.append(["Record ID", "Street Address", "City", "State/Province", "Postal Code", "Country"])
         for valid in validList:
-            sheet.append([valid['recordId'], valid['streetAddress'], valid['city'], valid['state'], valid['postalCode'], valid['country']])
+            # Make title case
+            for col in ['streetAddress', 'city', 'state', 'country']:
+                if valid.get(col):
+                    #Skip for state codes that are 2 letters, as they should be uppercase
+                    if col == 'state' and len(valid['state']) == 2:
+                        continue
+                    #remove [] and () and their contents from the string
+                    valid[col] = re.sub(r'\[.*?\]|\(.*?\)', '', valid[col]).title()
+
+            sheet.append([valid['recordId'], valid['streetAddress'], valid['city'], valid['state'] if len(str(valid['state'])) == 2 else valid['state'], valid['postalCode'].title(), valid['country']])
         file.save("valid_addresses.xlsx")
 
     for invalid in invalidList:
@@ -701,35 +693,35 @@ def refreshPage(function):
     st.rerun()
     function()
     
-
-# Streamlit UI
-st.title("Address Validator")
-
-
-uploadedFile = st.file_uploader("Upload a spreadsheet with addresses", type=["xlsx"])
-
-col1, col2, col3, col4 = st.columns(4)
-
-with col1:
-    instructionBtn = st.button("Instructions")
-if instructionBtn:
-    st.info("To use this address validator, please upload an Excel spreadsheet (.xlsx) with the following columns: Record ID, Address line 1, City, Province/State, Postal Code, Country. The first row should contain the column headers. After uploading the file, click the 'Validate' button to process the addresses. The results will show which addresses are valid and which are invalid, along with reasons for any invalid addresses. You can also save the results to new Excel files for valid and invalid addresses.")
+def mainPage():
+    # Streamlit UI
+    st.title("Address Validator")
 
 
-if st.session_state.get('validList') and st.session_state.get('invalidList'):
-    with col4:
-        saveBtn = st.button("Save results to Excel")
-    if saveBtn:
-        saveResults(st.session_state.validList, st.session_state.invalidList)
-        st.success("Results saved as valid_addresses.xlsx and invalid_addresses.xlsx")
+    uploadedFile = st.file_uploader("Upload a spreadsheet with addresses", type=["xlsx"])
 
-    with col3:
-        displayBtn = st.button("Display results")
-    if displayBtn:
-        displayResults(st.session_state.validList, st.session_state.invalidList)
+    col1, col2, col3, col4 = st.columns(4)
 
-with col2:
-    validateBtn = st.button("Validate") and uploadedFile
+    with col1:
+        instructionBtn = st.button("Instructions")
+    if instructionBtn:
+        st.info("To use this address validator, please upload an Excel spreadsheet (.xlsx) with the following columns: Record ID, Address line 1, City, Province/State, Postal Code, Country. The first row should contain the column headers. After uploading the file, click the 'Validate' button to process the addresses. The results will show which addresses are valid and which are invalid, along with reasons for any invalid addresses. You can also save the results to new Excel files for valid and invalid addresses.")
+
+
+    if st.session_state.get('validList') and st.session_state.get('invalidList'):
+        with col4:
+            saveBtn = st.button("Save results to Excel")
+        if saveBtn:
+            saveResults(st.session_state.validList, st.session_state.invalidList)
+            st.success("Results saved as valid_addresses.xlsx and invalid_addresses.xlsx")
+
+        with col3:
+            displayBtn = st.button("Display results")
+        if displayBtn:
+            st.switch_page(reviewPage)
+
+    with col2:
+        validateBtn = st.button("Validate") and uploadedFile
     if validateBtn:
         # Process the uploaded file and validate addresses
         with st.spinner("Processing"):
@@ -788,6 +780,26 @@ with col2:
 
         # After processing all addresses, display results
         st.success(f"Validation complete! Valid addresses: {len(st.session_state.validList)}, Invalid addresses: {len(st.session_state.invalidList)}")
-        st.rerun()
+        
+        if st.session_state.get('validList') and st.session_state.get('invalidList'):
+            if st.button("Confirm"):
+                st.rerun()
 
+def reviewPage():
+    st.title("Review and Save Results")
+    if st.session_state.get('validList') and st.session_state.get('invalidList'):
+        displayResults(st.session_state.validList, st.session_state.invalidList)
+    else:
+        st.info("No results to display. Please upload a file and validate addresses first.")
+        if st.button("Go to Validator"):
+            st.switch_page(mainPage)
 
+reviewPage = st.Page(reviewPage, title="Review Results", url_path="review")
+mainPage = st.Page(mainPage, title="Validator", url_path="validator", default=True)
+site = st.navigation([
+    mainPage,
+    reviewPage
+], expanded=True, position="top" 
+)
+site.run()
+#st.sidebar.selectbox("Select a page", ["Upload and Validate", "Review Results"])
