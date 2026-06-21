@@ -4,11 +4,12 @@ import streamlit as st
 import re
 import pycountry
 import difflib
+import zipfile
 import openpyxl as op
 import unicodedata
 import time
 import uuid
-
+from io import BytesIO
 
 def validateState(country, state):
     if not country:
@@ -758,8 +759,8 @@ def displayResults(validList, invalidList):
 
 def saveResults(validList, invalidList):
     #Open file and load main sheet, set column widths, and add header row
-    file = op.Workbook()
-    sheet = file.active
+    validFile = op.Workbook()
+    sheet = validFile.active
     sheet.column_dimensions['A'].width = 5
     sheet.column_dimensions['B'].width = 22
     sheet.column_dimensions['C'].width = 15
@@ -778,28 +779,38 @@ def saveResults(validList, invalidList):
                     continue
                 #remove [] and () and their contents from the string
                 valid[col] = re.sub(r'\[.*?\]|\(.*?\)', '', valid[col]).title()
-
         sheet.append([valid['recordId'], valid['streetAddress'], valid['city'], valid['state'] if len(str(valid['state'])) == 2 else valid['state'], valid['postalCode'], valid['country']])
-        # Save the workbook to a file
-    file.save("valid_addresses.xlsx")
+    # Save the workbook to a file
+    validBuffer = BytesIO()
+    validFile.save(validBuffer)
+    validBuffer.seek(0)
 
+    #Open file and load main sheet, set column widths, and add header row
+    invalidFile = op.Workbook()
+    sheet = invalidFile.active
+    sheet.column_dimensions['A'].width = 5
+    sheet.column_dimensions['B'].width = 22
+    sheet.column_dimensions['C'].width = 15
+    sheet.column_dimensions['D'].width = 15
+    sheet.column_dimensions['E'].width = 10
+    sheet.column_dimensions['F'].width = 15
+    sheet.append(["Record ID", "Street Address", "City", "State/Province", "Postal Code", "Country"])
+
+    # Add each invalid address to the sheet without formatting, to preserve the original data for review
     for invalid in invalidList:
-        #Open file and load main sheet, set column widths, and add header row
-        file = op.Workbook()
-        sheet = file.active
-        sheet.column_dimensions['A'].width = 5
-        sheet.column_dimensions['B'].width = 22
-        sheet.column_dimensions['C'].width = 15
-        sheet.column_dimensions['D'].width = 15
-        sheet.column_dimensions['E'].width = 10
-        sheet.column_dimensions['F'].width = 15
-        sheet.append(["Record ID", "Street Address", "City", "State/Province", "Postal Code", "Country"])
+        sheet.append([invalid['recordId'], invalid['streetAddress'], invalid['city'], invalid['state'], invalid['postalCode'], invalid['country']])
+    # Save
+    invalidBuffer = BytesIO()
+    invalidFile.save(invalidBuffer)
+    invalidBuffer.seek(0)
 
-        # Add each invalid address to the sheet without formatting, to preserve the original data for review
-        for invalid in invalidList:
-            sheet.append([invalid['recordId'], invalid['streetAddress'], invalid['city'], invalid['state'], invalid['postalCode'], invalid['country']])
-        # Save
-        file.save("invalid_addresses.xlsx")
+    zipBuffer = BytesIO()
+    with zipfile.ZipFile(zipBuffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("valid_addresses.xlsx", validBuffer.getvalue())
+        zf.writestr("invalid_addresses.xlsx", invalidBuffer.getvalue())
+    zipBuffer.seek(0)
+
+    return validBuffer, invalidBuffer
 
     
     
@@ -831,7 +842,7 @@ def mainPage():
 
     if st.session_state.get('validList') and st.session_state.get('invalidList'):
         with col4:
-            saveBtn = st.button("Save results to Excel")
+            saveBtn = st.download_button("Download results as Excel files", data=saveResults(st.session_state.validList, st.session_state.invalidList), file_name="validated_addresses.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         if saveBtn:
             saveResults(st.session_state.validList, st.session_state.invalidList)
             st.success("Results saved as valid_addresses.xlsx and invalid_addresses.xlsx")
@@ -924,8 +935,7 @@ def reviewPage():
         st.warning("Although it is possible to edit the id, it is not recommended as it may cause issues with the database. It is best to keep the record ID as-is.")
     if st.session_state.get('validList') and st.session_state.get('invalidList'):
         displayResults(st.session_state.validList, st.session_state.invalidList)
-        if st.button("Save results to Excel"):
-            saveResults(st.session_state.validList, st.session_state.invalidList)
+        if st.download_button("Download results as Excel files", data=saveResults(st.session_state.validList, st.session_state.invalidList), file_name="validated_addresses.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"):
             st.success("Results saved as valid_addresses.xlsx and invalid_addresses.xlsx")
         if st.button("Refresh"):
             refreshPage()
