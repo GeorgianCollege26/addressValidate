@@ -810,7 +810,7 @@ def saveResults(validList, invalidList):
         zf.writestr("invalid_addresses.xlsx", invalidBuffer.getvalue())
     zipBuffer.seek(0)
 
-    return validBuffer, invalidBuffer
+    return zipBuffer.getvalue()
 
     
     
@@ -842,7 +842,7 @@ def mainPage():
 
     if st.session_state.get('validList') and st.session_state.get('invalidList'):
         with col4:
-            saveBtn = st.download_button("Download results as Excel files", data=saveResults(st.session_state.validList, st.session_state.invalidList), file_name="validated_addresses.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            saveBtn = st.download_button("Download results as Excel files", data=saveResults(st.session_state.validList, st.session_state.invalidList), file_name="validated_addresses.zip", mime="application/zip")
         if saveBtn:
             saveResults(st.session_state.validList, st.session_state.invalidList)
             st.success("Results saved as valid_addresses.xlsx and invalid_addresses.xlsx")
@@ -935,7 +935,7 @@ def reviewPage():
         st.warning("Although it is possible to edit the id, it is not recommended as it may cause issues with the database. It is best to keep the record ID as-is.")
     if st.session_state.get('validList') and st.session_state.get('invalidList'):
         displayResults(st.session_state.validList, st.session_state.invalidList)
-        if st.download_button("Download results as Excel files", data=saveResults(st.session_state.validList, st.session_state.invalidList), file_name="validated_addresses.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"):
+        if st.download_button("Download results as Excel files", data=saveResults(st.session_state.validList, st.session_state.invalidList), file_name="validated_addresses.zip", mime="application/zip"):
             st.success("Results saved as valid_addresses.xlsx and invalid_addresses.xlsx")
         if st.button("Refresh"):
             refreshPage()
