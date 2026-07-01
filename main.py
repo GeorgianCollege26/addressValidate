@@ -7,6 +7,7 @@ import difflib
 import zipfile
 import openpyxl as op
 import unicodedata
+import datetime
 import time
 import uuid
 from io import BytesIO
@@ -842,7 +843,8 @@ def mainPage():
 
     if st.session_state.get('validList') and st.session_state.get('invalidList'):
         with col4:
-            saveBtn = st.download_button("Download results as Excel files", data=saveResults(st.session_state.validList, st.session_state.invalidList), file_name="validated_addresses.zip", mime="application/zip")
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            saveBtn = st.download_button("Download results as Excel files", data=saveResults(st.session_state.validList, st.session_state.invalidList), file_name=f"validated_addresses_{timestamp}.zip", mime="application/zip")
         if saveBtn:
             saveResults(st.session_state.validList, st.session_state.invalidList)
             st.success("Results saved as valid_addresses.xlsx and invalid_addresses.xlsx")
