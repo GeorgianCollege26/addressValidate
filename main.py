@@ -29,6 +29,7 @@ def validateState(country, state):
             return subdivision.code.split('-')[1]
     return False
 
+
 def formatString(string, removeAccents=True, removePunctuation=True, toUpper=False, leaveApostrophes=False, removeSpaces=False):
     if not string:
         return None
@@ -300,6 +301,7 @@ def abbreviateAddress(address):
             address = re.sub(r'\b' + re.escape(token) + r'\b', dictionary[token], address, flags=re.IGNORECASE)
     return address.upper()
 
+@st.cache_data
 def validateStreetType(address):
     if not address:
         return False
@@ -858,14 +860,19 @@ def mainPage():
         validateBtn = st.button("Validate") and uploadedFile
     if validateBtn:
         # Process the uploaded file and validate addresses
-        with st.spinner("Processing"):
+        with st.progress(0, text="Processing"):
+            progressBar = st.progress(0)
             # Read the Excel file using pandas
             # Excel rows: record id, Address line 1, City, Province/State, Postal Code, Country
             sheet = op.load_workbook(uploadedFile).active
             validList = []
             invalidList = []
             # Iterate through the rows of the spreadsheet and validate each address
+            currentRow = 0
             for row in sheet.iter_rows(values_only=True, min_row=2): #min_row=2 to skip header
+                rowCount = sheet.max_row - 1
+                currentRow += 1
+                progressBar.progress(currentRow / rowCount, text=f"Processing row {currentRow} of {rowCount}")
                 #skip empty rows
                 if row is None or all(cell is None for cell in row):
                     continue
