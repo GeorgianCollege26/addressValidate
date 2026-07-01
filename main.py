@@ -750,6 +750,13 @@ def editParamsPage():
     # Display the valid street types in a text area for editing
     validTypesText = st.text_area("Edit valid street types (one per line, format: Street suffix:standardized)\nNote that Avenue and Ave are marked to convert to AVE to recognize already shortened values", value="\n".join([f"{k}:{v}" for k, v in validTypes.items()]), height=400)
     if st.button("Save Changes"):
+        # Save a backup of the current validTypes.json file before saving changes
+        with open("validTypes.json", "r") as f:
+            backupValidTypes = json.load(f)
+        with open("validTypesLast.json", "w") as f:
+            json.dump(validTypes, f, indent=4)
+
+
         # Save the changes to the validTypes.json file
         newValidTypes = {}
         for line in validTypesText.splitlines():
@@ -758,17 +765,29 @@ def editParamsPage():
                 newValidTypes[abbr.strip()] = std.strip()
         with open("validTypes.json", "w") as f:
             json.dump(newValidTypes, f, indent=4)
-        st.success("Changes saved to validTypes.json. Please restart the application for changes to take effect.")
+        st.success("Changes saved to validTypes.json. Please rerun the validation to apply the new parameters.")
+        time.sleep(2)
+        refreshPage()
 
     if st.button("Go to Validator"):
         st.switch_page(mainPage)
+
+    if st.button("Undo last saved changes"):
+        with open("validTypesLast.json", "r") as f:
+            backupValidTypes = json.load(f)
+        with open("validTypes.json", "w") as f:
+            json.dump(backupValidTypes, f, indent=4)
+        st.success("Last saved changes restored. Please rerun the validation to apply the restored parameters.")
+        time.sleep(2)
+        refreshPage()
+
     if st.button("Reset to Default Parameters"):
         # Reset the validTypes.json file to default values
         with open("validTypesBackup.json", "r") as f:
             defaultValidTypes = json.load(f)
         with open("validTypes.json", "w") as f:
             json.dump(defaultValidTypes, f, indent=4)
-        st.success("Parameters reset to default values.")
+        st.success("Parameters reset to default values. Please rerun the validation to apply the default parameters.")
         time.sleep(2)
         refreshPage()
 
