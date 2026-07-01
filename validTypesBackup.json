@@ -1,9 +1,12 @@
 {
     "abbey": "ABBEY",
+    "abbey": "ABBEY",
     "acres": "ACRES",
+    "alley": "ALLEY",
     "alley": "ALLEY",
     "avenue": "AVE",
     "ave": "AVE",
+
     "bay": "BAY",
     "beach": "BEACH",
     "bend": "BEND",
@@ -12,6 +15,7 @@
     "by-pass": "BYPASS",
     "bypass": "BYPASS",
     "byway": "BYWAY",
+
     "campus": "CAMPUS",
     "cape": "CAPE",
     "centre": "CTR",
@@ -37,6 +41,7 @@
     "cross": "CROSS",
     "cul-de-sac": "CDS",
     "cds": "CDS",
+
     "dale": "DALE",
     "dell": "DELL",
     "diversion": "DIVERS",
@@ -44,6 +49,7 @@
     "downs": "DOWNS",
     "drive": "DR",
     "dr": "DR",
+
     "end": "END",
     "esplanade": "ESPL",
     "espl": "ESPL",
@@ -53,12 +59,14 @@
     "expy": "EXPY",
     "extension": "EXTEN",
     "exten": "EXTEN",
+
     "farm": "FARM",
     "field": "FIELD",
     "forest": "FOREST",
     "freeway": "FWY",
     "fwy": "FWY",
     "front": "FRONT",
+
     "gardens": "GDNS",
     "gdns": "GDNS",
     "gate": "GATE",
@@ -68,6 +76,7 @@
     "grounds": "GRNDS",
     "grnds": "GRNDS",
     "grove": "GROVE",
+
     "harbour": "HARBR",
     "harbor": "HARBR",
     "harbr": "HARBR",
@@ -76,14 +85,18 @@
     "hts": "HTS",
     "highlands": "HGHLDS",
     "hghlds": "HGHLDS",
+
     "highway": "HWY",
     "hwy": "HWY",
     "hill": "HILL",
     "hollow": "HOLLOW",
+
     "inlet": "INLET",
     "island": "ISLAND",
+
     "key": "KEY",
     "knoll": "KNOLL",
+
     "landing": "LANDNG",
     "landng": "LANDNG",
     "lane": "LANE",
@@ -94,6 +107,7 @@
     "lookout": "LKOUT",
     "lkout": "LKOUT",
     "loop": "LOOP",
+
     "mall": "MALL",
     "manor": "MANOR",
     "maze": "MAZE",
@@ -103,8 +117,10 @@
     "mount": "MOUNT",
     "mountain": "MTN",
     "mtn": "MTN",
+
     "orchard": "ORCH",
     "orch": "ORCH",
+
     "parade": "PARADE",
     "park": "PK",
     "pk": "PK",
@@ -128,7 +144,9 @@
     "pvt": "PVT",
     "promenade": "PROM",
     "prom": "PROM",
+
     "quay": "QUAY",
+
     "ramp": "RAMP",
     "range": "RG",
     "rg": "RG",
@@ -140,12 +158,14 @@
     "rte": "RTE",
     "row": "ROW",
     "run": "RUN",
+
     "square": "SQ",
     "sq": "SQ",
     "street": "ST",
     "st": "ST",
     "subdivision": "SUBDIV",
     "subdiv": "SUBDIV",
+
     "terrace": "TERR",
     "terr": "TERR",
     "thicket": "THICK",
@@ -156,6 +176,7 @@
     "trail": "TRAIL",
     "turnabout": "TRNABT",
     "trnabt": "TRNABT",
+
     "vale": "VALE",
     "via": "VIA",
     "view": "VIEW",
@@ -163,11 +184,13 @@
     "villge": "VILLGE",
     "villas": "VILLAS",
     "vista": "VISTA",
+
     "walk": "WALK",
     "way": "WAY",
     "wharf": "WHARF",
     "wood": "WOOD",
     "wynd": "WYND",
+
     "rue": "RUE",
     "allee": "ALLEE"
 }

@@ -13,6 +13,9 @@ import json
 import uuid
 from io import BytesIO
 
+with open("validTypes.json", "r") as f:
+    streetTypeJSON = json.load(f)
+
 def validateState(country, state):
     if not country:
         return False
@@ -307,8 +310,7 @@ def validateStreetType(address):
     if not address:
         return False
     
-    with open("validTypes.json", "r") as f:
-        validTypes = json.load(f)
+    validTypes = streetTypeJSON
 
     # Split into tokens and check for street types, starting from the end of the string
     tokens = formatString(address).lower().replace(".", "").split()
@@ -732,18 +734,51 @@ def reviewPage():
         displayResults(st.session_state.validList, st.session_state.invalidList)
         if st.download_button("Download results as Excel files", data=saveResults(st.session_state.validList, st.session_state.invalidList), file_name="validated_addresses.zip", mime="application/zip"):
             st.success("Results saved as valid_addresses.xlsx and invalid_addresses.xlsx")
-        if st.button("Refresh"):
-            refreshPage()
+        if st.button("Back to Validator"):
+            st.switch_page(mainPage)
     else:
         st.info("No results to display. Please upload a file and validate addresses first.")
         if st.button("Go to Validator"):
             st.switch_page(mainPage)
 
+def editParamsPage():
+    st.title("Edit Parameters")
+    st.info("This page allows you to edit the parameters used for address validation. You can add or remove valid street types. Please be careful when editing these parameters, as they may affect the validation results.")
+    
+    validTypes = streetTypeJSON
+    st.subheader("Valid Street Types")
+    # Display the valid street types in a text area for editing
+    validTypesText = st.text_area("Edit valid street types (one per line, format: Street suffix:standardized)\nNote that Avenue and Ave are marked to convert to AVE to recognize already shortened values", value="\n".join([f"{k}:{v}" for k, v in validTypes.items()]), height=400)
+    if st.button("Save Changes"):
+        # Save the changes to the validTypes.json file
+        newValidTypes = {}
+        for line in validTypesText.splitlines():
+            if ":" in line:
+                abbr, std = line.split(":", 1)
+                newValidTypes[abbr.strip()] = std.strip()
+        with open("validTypes.json", "w") as f:
+            json.dump(newValidTypes, f, indent=4)
+        st.success("Changes saved to validTypes.json. Please restart the application for changes to take effect.")
+
+    if st.button("Go to Validator"):
+        st.switch_page(mainPage)
+    if st.button("Reset to Default Parameters"):
+        # Reset the validTypes.json file to default values
+        with open("validTypesBackup.json", "r") as f:
+            defaultValidTypes = json.load(f)
+        with open("validTypes.json", "w") as f:
+            json.dump(defaultValidTypes, f, indent=4)
+        st.success("Parameters reset to default values.")
+        time.sleep(2)
+        refreshPage()
+
+editPage = st.Page(editParamsPage, title="Edit Parameters", url_path="edit-params")
 reviewPage = st.Page(reviewPage, title="Review Results", url_path="review")
 mainPage = st.Page(mainPage, title="Validator", url_path="validator", default=True)
 site = st.navigation([
     mainPage,
-    reviewPage
+    reviewPage,
+    editPage
 ], expanded=True, position="top" 
 )
 site.run()
