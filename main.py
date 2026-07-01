@@ -482,7 +482,10 @@ def displayResults(validList, invalidList):
                         valCon.error(f"An error occurred while displaying a valid address: {str(e)}")
                 else:
                     valCon.success(f"{valid['recordId']} : {valid['streetAddress']}, {valid['city']} {valid['state']}, {valid['postalCode']}, {valid['country']} is valid.")
-
+                    # st.markdown(f"**Record ID: {valid['recordId']}**\n"
+                    #     f"- Address: {valid['streetAddress']}, {valid['city']} {valid['state']}\n"
+                    #     f"- Error: {valid.get('error_message', 'Unknown error')}")
+                    
         with col2:
             st.header("Invalid addresses")
 
@@ -544,6 +547,10 @@ def displayResults(validList, invalidList):
                             refreshPage()
                 else:
                     invCon.error(f"{invalid['recordId']} : {invalid['streetAddress']}, {invalid['city']} {invalid['state']}, {invalid['postalCode']}, {invalid['country']} is invalid.")
+                    # st.markdown(f"**Record ID: {invalid['recordId']}**\n"
+                    #     f"- Address: {invalid['streetAddress']}, {invalid['city']} {invalid['state']}\n"
+                    #     f"- Error: {invalid.get('error_message', 'Unknown error')}")
+                    
     except Exception as e:
         st.error(f"An error occurred while displaying results: {str(e)}")
 
