@@ -13,8 +13,16 @@ import json
 import uuid
 from io import BytesIO
 
-with open("validTypes.json", "r") as f:
-    streetTypeJSON = json.load(f)
+if st.session_state.get('streetTypeJSON') is None:
+    st.session_state.customStreetTypeJSON = False
+    with open("validTypes.json", "r") as f:
+        st.session_state.streetTypeJSON = json.load(f)
+
+if st.session_state.get('postalCodePatterns') is None:
+    st.session_state.customPostalCodePatterns = False
+    with open("postalCodes.json", "r") as f:
+        st.session_state.postalCodePatterns = json.load(f)
+
 
 def validateState(country, state):
     if not country:
@@ -65,18 +73,12 @@ def formatString(string, removeAccents=True, removePunctuation=True, toUpper=Fal
     return string.upper() if toUpper else string
 
 def validatePostalCode(country, postalCode):
+    if not country:
+        return False
     #format the postal code by removing accents and punctuation, and converting to uppercase, to improve regex matching
     postalCode = formatString(postalCode, toUpper=True)
     # Define regex patterns for postal codes based on country
-    PSPatterns = {
-        'US': r'^\d{5}(-\d{4})?$',  # 5 digits or 5 digits + 4 digits for US' building specifiers (less used)
-        'CA': r'^[A-Za-z]\d[A-Za-z] \d[A-Za-z]\d$',  # Canada
-        'GB': r'^(GIR\s?0AA|[A-Za-z]{1,2}\d[A-Za-z\d]?\s?\d[A-Za-z]{2})$',  # UK
-        'FR': r'^\d{5}$',  # France
-        'ES': r'^\d{5}$',  # Spain
-
-        # Add more, perhaps with AI
-    }
+    PSPatterns = st.session_state.postalCodePatterns
     
     pattern = PSPatterns.get(country)
     if not pattern:
@@ -135,7 +137,8 @@ def normalizePostalCode(postalCode, country):
 def validateAddress(address):
     # If no address is provided, return an error message
     if not address:
-        return "No address provided."
+        address['error'] = "No address provided."
+        return address
     errorFields = []
     
     # If any of the required fields are missing, return an error message specifying which field is missing
@@ -143,8 +146,9 @@ def validateAddress(address):
         if address.get(field) == None or str(address.get(field)).strip().lower() == "none":
             errorFields.append(f"{field}")
     if errorFields:
-        errorFields.insert(0, "missing")
-        return errorFields
+        errorFields.append("missing")
+        address['error'] = errorFields
+        return address  
 
 
     try:
@@ -186,26 +190,23 @@ def validateAddress(address):
         if not streetAddress:
             errorFields.append("Street address is required.")
         
-        if errorFields:
-            return errorFields
         
         streetValid = validateStreetType(abbreviateAddress(streetAddress))
         stateValid = validateState(countryCode, stateCode)
         postalCodeValid = validatePostalCode(countryCode, postalCode)
 
         if stateValid == False: 
-            return f"Invalid state/province for the specified country {countryCode}/{stateCode}"
+            errorFields.append(f"Invalid state/province for the specified country {countryCode}/{stateCode}")
 
         if postalCodeValid == False:
-            return f"Invalid postal code format for the specified country. {postalCode}"
+            errorFields.append(f"Invalid postal code format for ({countryCode}): {postalCode}")
         
         if not streetValid:
-            return "Street type could not be determined from the address."
-        if streetValid[0] == None:
-            return "Street type could not be determined from the address."
+            errorFields.append("Street type could not be determined from the address.")
         
         if errorFields:
-            return errorFields
+            address['error'] = ", ".join(errorFields)
+            return address
 
         # If all validations pass, return the validated address as a dictionary
         # but return state codes instead of names for US and Canada, as they are more commonly used in addresses
@@ -218,12 +219,15 @@ def validateAddress(address):
             'streetAddress': formatString(streetValid, toUpper=True, removeAccents=True, leaveApostrophes=True),
             'city': formatString(city, toUpper=True, removeAccents=True, leaveApostrophes=True),
             'recordId': str(address.get('recordId')),
-            'programId': str(address.get('programId'))
+            'programId': str(address.get('programId')),
+            'error': None
         }
         ##st.success(f"{validatedAddress['streetAddress']}, {validatedAddress['city']} {validatedAddress['state']}, {validatedAddress['postalCode']}, {validatedAddress['country']} is valid.")
         return validatedAddress
     except Exception as e:
-        return f"An error occurred during validation: {str(e)}"
+        address['error'] = f"An error occurred during validation: {str(e)}"
+        return address
+        
 
 
 def getCountryCode(countryName):
@@ -310,7 +314,7 @@ def validateStreetType(address):
     if not address:
         return False
     
-    validTypes = streetTypeJSON
+    validTypes = st.session_state.streetTypeJSON
 
     # Split into tokens and check for street types, starting from the end of the string
     tokens = formatString(address).lower().replace(".", "").split()
@@ -324,7 +328,7 @@ def validateStreetType(address):
             return streetAddress.upper()
 
     #st.warning(formatString(address) + " | does not contain a valid street type.")
-    return None
+    return False
 
 def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowCol, addressID):
     ##st.info(f"Attempting to fix swapped columns for the following data: {addressLineCol}, {cityCol}, {stateCol}, {postalCodeCol}, {countryRowCol}")
@@ -333,7 +337,7 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
     foundPostalCode = None
     foundAddressLine = None
     foundCity = None
-    confidenceError = []
+    errors = []
     unclaimed = []
     
     colList = [addressLineCol, cityCol, stateCol, postalCodeCol, countryRowCol]
@@ -358,7 +362,7 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
             #if foundCity is the same as the state, the city match below likely miscaptured it
             if foundCity and foundCity.lower() == foundState.lower():
                     foundCity = None
-                    confidenceError.append("city")
+                    errors.append("city")
             try:
                 unclaimed.remove(currentCol)
             except ValueError:                
@@ -367,7 +371,7 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
             
         if testStreet:
             try:
-                confidenceError.remove("address line")
+                errors.remove("address line")
             except ValueError:
                 pass
             foundAddressLine = testStreet
@@ -395,7 +399,7 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
         #If it contains spaces and digits and is longer than 8 characters, it's likely an address line
         if len(currentCol) > 8 and any(char.isdigit() for char in currentCol) and " " in currentCol and not testStreet:
             foundAddressLine = currentCol
-            confidenceError.append("address line")
+            errors.append("address line")
             try:
                 unclaimed.remove(currentCol)
             except ValueError:                
@@ -410,14 +414,14 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
             'postalCode': foundPostalCode,
             'streetAddress': foundAddressLine,
             'city': foundCity,
-            'confidenceError': confidenceError,
+            'error': errors.insert(0, "passed column swap fix"),
             'recordId': str(addressID),
             'programId': f'{addressID}_{uuid.uuid4()}'
         }
         return address
     else:
-        st.warning("Could not automatically fix swapped columns. Please ensure the spreadsheet is formatted correctly.")
-        st.info(f"After attempting to fix swapped columns, the following data was found: Address line:{foundAddressLine}, City: {foundCity}, State: {foundState}, Postal code: {foundPostalCode}, Country: {foundCountry}")
+        #st.warning("Could not automatically fix swapped columns. Please ensure the spreadsheet is formatted correctly.")
+        #st.info(f"After attempting to fix swapped columns, the following data was found: Address line:{foundAddressLine}, City: {foundCity}, State: {foundState}, Postal code: {foundPostalCode}, Country: {foundCountry}")
         return None
     
 def displayResults(validList, invalidList): 
@@ -464,12 +468,12 @@ def displayResults(validList, invalidList):
                             #Test changes button
                             if st.button("Test changes", key=f"test_valid_{valid['programId']}"):
                                 testResult = validateAddress(address)
-                                if isinstance(testResult, dict):
+                                if not testResult['error']:
                                     st.success(f"After changes, address is still valid: {testResult['streetAddress']}, {testResult['city']} {testResult['state']}, {testResult['postalCode']}, {testResult['country']}.")
                                     index = st.session_state.validList.index(valid)
                                     st.session_state.validList[index] = testResult
                                 else:
-                                    st.error(f"After changes, address is now invalid: {testResult}. (Not saving changes)")
+                                    st.error(f"After changes, address is now invalid: {testResult['error']}. (Not saving changes)")
 
                             # Manually marking as invalid
                             if st.button("Mark as invalid", key=f"invalid_valid_{valid['programId']}"):
@@ -501,8 +505,8 @@ def displayResults(validList, invalidList):
                             }
                 if editMode:
                     with invCon.expander(f"{invalid['recordId']} : {invalid['streetAddress']}, {invalid['city']} {invalid['state']}, {invalid['postalCode']}, {invalid['country']}"):
-                        if invalid.get('confidenceError'):
-                            st.warning(str(invalid['confidenceError']))
+                        if invalid.get('error'):
+                            st.warning(str(invalid['error']))
 
                         # Let user edit the fields
                         for col in ['recordId', 'streetAddress', 'city', 'state', 'postalCode', 'country']:
@@ -521,7 +525,7 @@ def displayResults(validList, invalidList):
                         # Button to test
                         if st.button("Test changes", key=f"test_{invalid['programId']}"):
                             testResult = validateAddress(address)
-                            if isinstance(testResult, dict):
+                            if not testResult['error']:
                                 st.success(f"After changes, address is now valid: {testResult['streetAddress']}, {testResult['city']} {testResult['state']}, {testResult['postalCode']}, {testResult['country']}. Moving to valid list...")
                                 st.session_state.validList.append(testResult)
                                 st.session_state.invalidList.remove(invalid)
@@ -529,7 +533,7 @@ def displayResults(validList, invalidList):
                                 time.sleep(2)
                                 refreshPage()
                             else:
-                                st.error(f"After changes, address is still invalid: {testResult} (Changes not saved)")
+                                st.error(f"After changes, address is still invalid: {testResult['error']} (Changes not saved)")
 
                         # Manually marking as valid
                         if st.button("Mark as valid", key=f"valid_{address['programId']}"):
@@ -623,7 +627,11 @@ def mainPage():
     # Streamlit UI
     st.set_page_config(layout="centered")
     st.title("Address Validator")
-
+    
+    if st.session_state.customStreetTypeJSON:
+        st.success("Using custom street type JSON file for validation.")
+    if st.session_state.customPostalCodePatterns:
+        st.success("Using custom postal code patterns JSON file for validation.")
 
     uploadedFile = st.file_uploader("Upload a spreadsheet with addresses", type=["xlsx"])
 
@@ -687,34 +695,28 @@ def mainPage():
                     'postalCode': postalCode,
                     'streetAddress': addressLine,
                     'recordId': addressId,
-                    'confidenceError': None,
+                    'error': None,
                     'programId': f'{addressId}_{uuid.uuid4()}'
                 }
                 validateResult = validateAddress(address)
-                if isinstance(validateResult, dict):
+                if not validateResult['error']:
                     validList.append(validateResult)
                     ##st.write(f"{streetAddress} {streetType}, {state}, {postalCode}, {country} is valid.")
                 else:
                     tryFix = None
-                    if isinstance(validateResult, list) and "missing" in validateResult:
-                        address['confidenceError'] = "Missing fields: " + ", ".join(validateResult[1:])#don't include the last element which is just "missing"
+                    if  "missing" in validateResult['error']:
                         invalidList.append(address)
                         continue
                     elif isinstance(validateResult, list): # and len(validateResult) == 1:
                         tryFix = fixSwappedCols(addressLine, city, state, postalCode, country, addressId)
                     if tryFix:
                         newResult = validateAddress(tryFix)
-                        if isinstance(newResult, dict):
+                        if "passed column swap fix" in newResult['error']:
                             validList.append(newResult)
-                            ##st.write(f"{address} was invalid because {validateResult}. However, after attempting to fix swapped columns, {tryFix['streetAddress']},{tryFix['city']} {tryFix['state']}, {tryFix['postalCode']}, {tryFix['country']} is valid. Confidence warnings of fix: {tryFix['confidenceError']}")
                         else:
-                            address['confidenceError'] = validateResult
-                            invalidList.append(address)
-                            ##st.error(f"{address} is invalid. Reason: {validateResult}. Also attempted to fix swapped columns, but it still failed validation. Reason: {newResult}")
+                            invalidList.append(newResult)
                     else:
-                        address['confidenceError'] = validateResult
-                        invalidList.append(address)
-                        ##st.error(f"{address}is invalid. Reason: {validateResult}")
+                        invalidList.append(validateResult)
 
         # Update session state with results
         st.session_state.validList = validList
@@ -752,59 +754,159 @@ def editParamsPage():
     st.title("Edit Parameters")
     st.info("This page allows you to edit the parameters used for address validation. You can add or remove valid street types. Please be careful when editing these parameters, as they may affect the validation results.")
     
-    validTypes = streetTypeJSON
+    validTypes = st.session_state.streetTypeJSON
+
+    groups = {}
+    uploadedJSON = st.file_uploader("Upload a JSON file with street types", type=["json"])
+    if uploadedJSON and st.button("Upload new street types JSON"):
+        if uploadedJSON:
+            try:
+                newStreetTypes = json.load(uploadedJSON)
+                if isinstance(newStreetTypes, dict):
+                    st.session_state.streetTypeJSON = newStreetTypes
+                    st.session_state.customStreetTypeJSON = True
+                    st.success("Successfully updated street types from uploaded JSON.")
+                    time.sleep(2)
+                    refreshPage()
+                else:
+                    st.error("Uploaded JSON is not a valid dictionary of street types.")
+            except Exception as e:
+                st.error(f"An error occurred while loading the JSON: {str(e)}")
+
     st.subheader("Valid Street Types")
     # Display the valid street types in a text area for editing
-    validTypesText = st.text_area("Edit valid street types (one per line, format: Street suffix:standardized)\nNote that Avenue and Ave are marked to convert to AVE to recognize already shortened values", value="\n".join([f"{k}:{v}" for k, v in validTypes.items()]), height=400)
-    if st.button("Save Changes"):
-        # Save a backup of the current validTypes.json file before saving changes
-        with open("validTypes.json", "r") as f:
-            backupValidTypes = json.load(f)
-        with open("validTypesLast.json", "w") as f:
-            json.dump(validTypes, f, indent=4)
+    for abbreviation, standardized in validTypes.items():
+        if standardized not in groups:
+            groups[standardized] = []
+        groups[standardized].append(abbreviation)
 
+    st.header("Groups")
+    for standardized, abbreviations in sorted(groups.items(), key=lambda x: x[0]):
+        with st.expander(f"{standardized} ({', '.join(abbreviations)})"):
+            standardized = st.text_input("Standardized street type", value=standardized, key=f"std_{standardized}")
+            abbreviations = st.text_area("Abbreviations (one per line)", value="\n".join(abbreviations), key=f"abbr_{standardized}")
+            if st.button("Save changes", key=f"save_{standardized}"):
+                if standardized and abbreviations:
+                    # Remove old abbreviations for this standardized type
+                    for abbr in list(validTypes.keys()):
+                        if validTypes[abbr] == standardized:
+                            del validTypes[abbr]
+                    # Add new abbreviations
+                    for abbr in abbreviations.splitlines():
+                        validTypes[abbr.strip()] = standardized.strip()
+                    st.session_state.streetTypeJSON = validTypes
+                    st.session_state.customStreetTypeJSON = True
+                    st.success(f"Updated street type: {standardized} with abbreviations: {', '.join(abbreviations.splitlines())}")
+                    time.sleep(2)
+                    refreshPage()
+                else:
+                    st.error("Please enter both a standardized street type and at least one abbreviation.")
+    
+    with st.expander("Add a new street type"):
+        newStandardized = st.text_input("New standardized street type", value="", key="new_std")
+        newAbbreviations = st.text_area("New abbreviations (one per line)", value="", key="new_abbr")
+        if st.button("Add new street type"):
+            if newStandardized and newAbbreviations:
+                for abbr in newAbbreviations.splitlines():
+                    validTypes[abbr.strip()] = newStandardized.strip()
+                st.success(f"Added new street type: {newStandardized} with abbreviations: {', '.join(newAbbreviations.splitlines())}")
+                st.session_state.customStreetTypeJSON = True
+                st.session_state.streetTypeJSON = validTypes
+                time.sleep(2)
+                refreshPage()
+            else:
+                st.error("Please enter both a standardized street type and at least one abbreviation.")
 
-        # Save the changes to the validTypes.json file
-        newValidTypes = {}
-        for line in validTypesText.splitlines():
-            if ":" in line:
-                abbr, std = line.split(":", 1)
-                newValidTypes[abbr.strip()] = std.strip()
-        with open("validTypes.json", "w") as f:
-            json.dump(newValidTypes, f, indent=4)
-        st.success("Changes saved to validTypes.json. Please rerun the validation to apply the new parameters.")
-        time.sleep(2)
-        refreshPage()
 
     if st.button("Go to Validator"):
         st.switch_page(mainPage)
 
-    if st.button("Undo last saved changes"):
-        with open("validTypesLast.json", "r") as f:
-            backupValidTypes = json.load(f)
-        with open("validTypes.json", "w") as f:
-            json.dump(backupValidTypes, f, indent=4)
-        st.success("Last saved changes restored. Please rerun the validation to apply the restored parameters.")
-        time.sleep(2)
-        refreshPage()
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    settingsFile = f"street_types_{timestamp}.json"
+    
+    settingsBuffer = BytesIO()
+    
+    if st.download_button("Download settings", data=json.dumps(validTypes, indent=4), file_name=settingsFile):
+        settingsBuffer.write(json.dumps(validTypes, indent=4).encode())
+        settingsBuffer.seek(0)
 
-    if st.button("Reset to Default Parameters"):
-        # Reset the validTypes.json file to default values
-        with open("validTypesBackup.json", "r") as f:
-            defaultValidTypes = json.load(f)
-        with open("validTypes.json", "w") as f:
-            json.dump(defaultValidTypes, f, indent=4)
-        st.success("Parameters reset to default values. Please rerun the validation to apply the default parameters.")
-        time.sleep(2)
-        refreshPage()
+def editPostalCodePage():
+
+    uploadedJSON = st.file_uploader("Upload a JSON file with Postal Code patterns", type=["json"])
+    if uploadedJSON and st.button("Upload new postal code patterns JSON"):
+        #check if the uploaded file is a valid JSON
+        try:
+            newPostalCodePatterns = json.load(uploadedJSON)
+            if isinstance(newPostalCodePatterns, dict):
+                st.session_state.postalCodePatterns = newPostalCodePatterns
+                st.session_state.customPostalCodePatterns = True
+                st.success("Uploaded new postal code patterns JSON successfully.")
+                time.sleep(2)
+                refreshPage()
+            else:
+                st.error("Uploaded JSON is not a valid dictionary of postal code patterns.")
+        except json.JSONDecodeError:
+            st.error("Uploaded file is not a valid JSON.")
+
+    st.title("Edit Postal Code Parameters")
+    st.info("This page allows you to edit the parameters used for postal code validation. You can add or remove valid postal code formats. Please be careful when editing these parameters, as they may affect the validation results.")
+
+    for country, pattern in st.session_state.postalCodePatterns.items():
+        countryName = pycountry.countries.get(alpha_2=country).name if pycountry.countries.get(alpha_2=country) else country
+        newPattern = st.text_input(f"Postal code pattern for {countryName}", value=pattern, key=f"postal_{country}")
+        if newPattern != pattern:
+            st.session_state.postalCodePatterns[country] = newPattern
+            st.success(f"Updated postal code pattern for {countryName} to: {newPattern}")
+            st.session_state.customPostalCodePatterns = True
+            time.sleep(2)
+            refreshPage()
+    
+    st.header("Add new postal code")
+    addCountry = st.text_input("Country name or code")
+    addPattern = st.text_input("Postal Code REGEX")
+    # Check if already a country code
+    if addCountry and len(addCountry) == 2 and pycountry.countries.get(alpha_2=addCountry.upper()):
+        addCountry = addCountry.upper()
+    else:
+        countryCode = getCountryCode(addCountry)
+        if countryCode:
+            addCountry = countryCode
+        else:
+            st.warning(f"Could not find a valid country code for {addCountry}. Please enter a valid country name or ISO 3166-1 alpha-2 code.")
+
+    if st.button("Add new parameter"):
+        if addCountry and addPattern:
+            st.session_state.postalCodePatterns[addCountry] = addPattern
+            st.session_state.customPostalCodePatterns = True
+            st.success(f"Added postal code pattern for {addCountry}: {addPattern}")
+            time.sleep(2)
+            refreshPage()
+
+    if st.button("Go to Validator"):
+        st.switch_page(mainPage)
+
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    settingsFile = f"PostalCodePatterns_{timestamp}.json"
+    
+    settingsBuffer = BytesIO()
+    
+    if st.download_button("Download settings", data=json.dumps(st.session_state.postalCodePatterns, indent=4), file_name=settingsFile):
+        settingsBuffer.write(json.dumps(st.session_state.postalCodePatterns, indent=4).encode())
+        settingsBuffer.seek(0)
+    
+    
+
+
 
 editPage = st.Page(editParamsPage, title="Edit Parameters", url_path="edit-params")
 reviewPage = st.Page(reviewPage, title="Review Results", url_path="review")
 mainPage = st.Page(mainPage, title="Validator", url_path="validator", default=True)
+postalCodePage = st.Page(editPostalCodePage, title="Edit Postal Codes", url_path="edit-postal-codes")
 site = st.navigation([
     mainPage,
     reviewPage,
-    editPage
+    editPage,
+    postalCodePage
 ], expanded=True, position="top" 
 )
 site.run()
