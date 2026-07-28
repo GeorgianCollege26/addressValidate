@@ -641,9 +641,9 @@ def mainPage():
         instructionBtn = st.button("Instructions")
     if instructionBtn:
         st.warning("Upload an Excel spreadsheet (.xlsx) with the following columns: Record ID, Address line 1, City, Province/State, Postal Code, Country. The first row should contain the column headers.")
-        st.info("CLick upload and select a file matching above")
+        st.info("Click upload and select an Excel file with an xlsx extension.")
         st.info("After uploading the file, click 'Validate' to process the addresses. ")
-        st.info("Once validation is complete, you can choose to view or save the results. ")
+        st.info("Once validation is complete, the page will refresh,\nThen you can choose to view or save the results. ")
 
 
     if st.session_state.get('validList') and st.session_state.get('invalidList'):
@@ -662,71 +662,77 @@ def mainPage():
     with col2:
         validateBtn = st.button("Validate") and uploadedFile
     if validateBtn:
-        # Process the uploaded file and validate addresses
-        with st.progress(0, text="Processing"):
-            progressBar = st.progress(0)
-            # Read the Excel file using pandas
-            # Excel rows: record id, Address line 1, City, Province/State, Postal Code, Country
-            sheet = op.load_workbook(uploadedFile).active
-            validList = []
-            invalidList = []
-            # Iterate through the rows of the spreadsheet and validate each address
-            currentRow = 0
-            for row in sheet.iter_rows(values_only=True, min_row=2): #min_row=2 to skip header
-                rowCount = sheet.max_row - 1
-                currentRow += 1
-                progressBar.progress(currentRow / rowCount, text=f"Processing row {currentRow} of {rowCount}")
-                #skip empty rows
-                if row is None or all(cell is None for cell in row):
-                    continue
-                # Grab columns from the row
-                addressLine = (row[1])
-                state = (row[3])
-                city = (row[2])
-                postalCode = ((row[4]))
-                country = row[5]
-                addressId = row[0]
-
-                #Assign columns to dict
-                address = {
-                    'country': country,
-                    'state': state,
-                    'city': city,
-                    'postalCode': postalCode,
-                    'streetAddress': addressLine,
-                    'recordId': addressId,
-                    'error': None,
-                    'programId': f'{addressId}_{uuid.uuid4()}'
-                }
-                validateResult = validateAddress(address)
-                if not validateResult['error']:
-                    validList.append(validateResult)
-                    ##st.write(f"{streetAddress} {streetType}, {state}, {postalCode}, {country} is valid.")
-                else:
-                    tryFix = None
-                    if  "missing" in validateResult['error']:
-                        invalidList.append(address)
+        try:
+            # Process the uploaded file and validate addresses
+            with st.progress(0, text="Processing"):
+                progressBar = st.progress(0)
+                # Read the Excel file using pandas
+                # Excel rows: record id, Address line 1, City, Province/State, Postal Code, Country
+                sheet = op.load_workbook(uploadedFile).active
+                validList = []
+                invalidList = []
+                # Iterate through the rows of the spreadsheet and validate each address
+                currentRow = 0
+                for row in sheet.iter_rows(values_only=True, min_row=2): #min_row=2 to skip header
+                    rowCount = sheet.max_row - 1
+                    currentRow += 1
+                    progressBar.progress(currentRow / rowCount, text=f"Processing row {currentRow} of {rowCount}")
+                    #skip empty rows
+                    if row is None or all(cell is None for cell in row):
                         continue
-                    elif isinstance(validateResult, list): # and len(validateResult) == 1:
-                        tryFix = fixSwappedCols(addressLine, city, state, postalCode, country, addressId)
-                    if tryFix:
-                        newResult = validateAddress(tryFix)
-                        if "passed column swap fix" in newResult['error']:
-                            validList.append(newResult)
-                        else:
-                            invalidList.append(newResult)
+                    # Grab columns from the row
+                    addressLine = (row[1])
+                    state = (row[3])
+                    city = (row[2])
+                    postalCode = ((row[4]))
+                    country = row[5]
+                    addressId = row[0]
+
+                    #Assign columns to dict
+                    address = {
+                        'country': country,
+                        'state': state,
+                        'city': city,
+                        'postalCode': postalCode,
+                        'streetAddress': addressLine,
+                        'recordId': addressId,
+                        'error': None,
+                        'programId': f'{addressId}_{uuid.uuid4()}'
+                    }
+                    validateResult = validateAddress(address)
+                    if not validateResult['error']:
+                        validList.append(validateResult)
+                        ##st.write(f"{streetAddress} {streetType}, {state}, {postalCode}, {country} is valid.")
                     else:
-                        invalidList.append(validateResult)
+                        tryFix = None
+                        if  "missing" in validateResult['error']:
+                            invalidList.append(address)
+                            continue
+                        elif isinstance(validateResult, list): # and len(validateResult) == 1:
+                            tryFix = fixSwappedCols(addressLine, city, state, postalCode, country, addressId)
+                        if tryFix:
+                            newResult = validateAddress(tryFix)
+                            if "passed column swap fix" in newResult['error']:
+                                validList.append(newResult)
+                            else:
+                                invalidList.append(newResult)
+                        else:
+                            invalidList.append(validateResult)
+                
 
-        # Update session state with results
-        st.session_state.validList = validList
-        st.session_state.invalidList = invalidList
+            # Update session state with results
+            st.session_state.validList = validList
+            st.session_state.invalidList = invalidList
 
-        # After processing all addresses, display results
-        st.success(f"Validation complete! Valid addresses: {len(st.session_state.validList)}, Invalid addresses: {len(st.session_state.invalidList)}")
-        
-        time.sleep(2)
-        refreshPage()
+            # After processing all addresses, display results
+            st.success(f"Validation complete! Valid addresses: {len(st.session_state.validList)}, Invalid addresses: {len(st.session_state.invalidList)}")
+            
+            time.sleep(2)
+            refreshPage()
+
+        except Exception as e:
+            st.error(f"An error occurred while processing the file: {str(e)}")
+            st.info("Please ensure the uploaded file is a valid Excel spreadsheet with the correct columns.")
 
 def reviewPage():
     if st.session_state.get('validList') and st.session_state.get('invalidList'):
@@ -736,8 +742,8 @@ def reviewPage():
     st.title("Review and Save Results")
     if st.button("Instructions"):
         st.info("This page displays the results of the address validation. Valid addresses are shown on the left, and invalid addresses are shown on the right. ")
-        st.info("You can edit invalid addresses and test them for validity. If an address is valid after editing, it will move to the valid list. You can also manually mark an address as valid. Once you are satisfied with the results, you can save them to Excel files.")
-        st.warning("Please note that marking an address as valid will save it as-is, it will not automatically fill blanks, be converted to a standardized format. It will only capitalize first letters. Saving edits to an address only stores the changes to the exported excel file, it does not change the orignal data")
+        st.info("In editing mode, you can edit addresses and retest them. If an address is valid after editing, it will move to the valid list. You can also manually mark an address as valid. To enter editing mode, check the 'Show edit mode' checkbox. ")
+        st.warning("Please note that marking an address as valid will save it as-is, it will not automatically fill blanks or be converted to a standardized format. Saving edits to an address only stores the changes to the exported excel file, it does not change the orignal data")
         st.warning("Although it is possible to edit the id, it is not recommended as it may cause issues with the database. It is best to keep the record ID as-is.")
     if st.session_state.get('validList') and st.session_state.get('invalidList'):
         displayResults(st.session_state.validList, st.session_state.invalidList)
@@ -905,8 +911,7 @@ postalCodePage = st.Page(editPostalCodePage, title="Edit Postal Codes", url_path
 site = st.navigation([
     mainPage,
     reviewPage,
-    editPage,
-    postalCodePage
+    editPage
 ], expanded=True, position="top" 
 )
 site.run()
