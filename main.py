@@ -256,12 +256,12 @@ def getState(stateName, countryCode, argumentType='name'):
         subdivisionCodes = [subdivision.code.split('-')[1] for subdivision in subdivisions]
         #use difflib to find the closest match for the state name or code, allowing for minor misspellings
         closestName = difflib.get_close_matches(stateName, subdivisionNames, n=1, cutoff=0.8)
-        closestCode = difflib.get_close_matches(stateName, subdivisionCodes, n=1, cutoff=0.8)
-        if closestName:
-            closestSubdivision = next(subdivision for subdivision in subdivisions if subdivision.name == closestName[0])
-            return closestSubdivision.code.split('-')[1] if argumentType == 'code' else closestSubdivision.name
-        elif closestCode:
+        closestCode = difflib.get_close_matches(stateName.upper(), subdivisionCodes, n=1, cutoff=0.8)
+        if closestCode:
             closestSubdivision = next(subdivision for subdivision in subdivisions if subdivision.code.split('-')[1] == closestCode[0])
+            return closestSubdivision.code.split('-')[1] if argumentType == 'code' else closestSubdivision.name
+        elif closestName:
+            closestSubdivision = next(subdivision for subdivision in subdivisions if subdivision.name == closestName[0])
             return closestSubdivision.code.split('-')[1] if argumentType == 'code' else closestSubdivision.name
         else:
             for sn in subdivisionNames:
@@ -900,8 +900,162 @@ def editPostalCodePage():
         settingsBuffer.write(json.dumps(st.session_state.postalCodePatterns, indent=4).encode())
         settingsBuffer.seek(0)
     
-    
+def instructionsPage():
+    # Renders the instructions.html file in the Streamlit app
+    st.title("Instructions")
 
+    st.header("Validation Instructions")
+
+    st.markdown("**Step 1:** Click **Upload** to open your file browser.")
+    st.image("instructions/images/step1.gif", use_container_width=True)
+
+    st.markdown("""
+    **Step 2:** Select the Excel file you want to validate and click **Open**.
+
+    **Note:** The file must be in **.xlsx** format.
+    """)
+
+    st.image("instructions/images/step2.png", use_container_width=True)
+
+    st.info(
+        "Ensure that your Excel file contains the correct columns for address validation."
+    )
+
+    st.image(
+        "instructions/images/columns.png",
+        caption="Required Columns: ID, Address, City, State, Postal Code, and Country",
+        use_container_width=True,
+    )
+
+    st.markdown("""
+    **Step 3:** After selecting the file, click the **Validate** button to start the validation process.
+
+    Once the page refreshes, you will have the option to view or export the results.
+    """)
+
+    st.image("instructions/images/step3.jpg", use_container_width=True)
+
+    st.divider()
+
+    st.header("Review and Save Results Instructions")
+
+    st.markdown("""
+    **Step 1:** To navigate to the review page, click the **Display Results** button after the validation process is complete, or use the **Review Results** link in the navigation menu.
+    """)
+
+    st.markdown("""
+    **Step 2:** In the default view you will see:
+
+    - ✅ Valid addresses on the left (green)
+    - ❌ Invalid addresses on the right (red)
+
+    Scroll through the tables to review the validation results.
+    """)
+
+    st.image(
+        "instructions/images/review1.jpg",
+        caption="Review Page",
+        use_container_width=True,
+    )
+
+    st.markdown("""
+    **Step 3:** Enable editing by checking the **Show edit mode** checkbox above the results. In edit mode you can modify address fields directly within the table.
+    """)
+
+    st.warning("Important Notes")
+
+    st.markdown("""
+    - Testing an **invalid address** automatically moves it to the valid table if the edits are valid.
+    - Testing an **already valid address** does not automatically save or move it.
+    - Marking an address as valid saves it **as entered**. Missing fields will **not** be automatically filled or standardized.
+    - Saving edits only affects the exported Excel file—it does **not** modify the original data.
+    - Editing the **ID** is possible but **not recommended**, as it may cause database issues.
+    - For best results, use full address names (e.g., **Ontario** instead of **ON**, **Street** instead of **St.**).
+    """)
+
+    st.markdown("""
+    **Step 4:** After reviewing and editing the addresses, click **Download Results** to export the validated data as zipped Excel files.
+    """)
+
+    st.divider()
+
+    st.header("Street Type Parameters")
+
+    st.write(
+        "This page provides information about the street type parameters used during address validation."
+    )
+
+    st.write(
+        'Street types are standardized abbreviations for common street suffixes, such as **"St"** for **"Street"** or **"Ave"** for **"Avenue"**.'
+    )
+
+    with st.expander("Uploading a File from Previous Edits", expanded=True):
+
+        st.write(
+            "If you previously exported your validation results, you can upload them again for additional edits or validation."
+        )
+
+        st.write(
+            "The file must be in **.json** format and should have been exported from the address validation tool."
+        )
+
+        st.info(
+            'For a visual guide, refer to the "Validation Instructions" section above.'
+        )
+
+    with st.expander("Making Edits", expanded=True):
+
+        st.markdown("""
+    **Step 1:** Find the standardized street type you want to edit (e.g. **St → Street**).
+
+    If you want to add a new street type instead, see the section below.
+    """)
+
+        st.markdown("""
+    **Step 2:** Click the table cell containing the street type. The cell will become editable.
+    """)
+
+        st.markdown("""
+    **Step 3:** Each entry contains:
+
+    - Abbreviation
+    - Full street type name
+
+    To add additional forms, separate each one with a **new line only**.
+
+    **Note:** Download the updated settings after editing so they can be reused in future validation sessions.
+    """)
+
+        st.image(
+            "instructions/images/streetTypeEdit.jpg",
+            caption="Street Type Editing",
+            use_container_width=True,
+        )
+
+    with st.expander("Adding New Street Types", expanded=True):
+
+        st.markdown("""
+    **Step 1:** Scroll to the bottom of the street type table to find the **Add New Street Type** section.
+    """)
+
+        st.markdown("""
+    **Step 2:** Enter:
+
+    - Abbreviation
+    - Full street type name
+
+    If multiple forms exist, separate each one using a new line.
+    """)
+
+        st.info(
+            "Copy the standardized abbreviation into the abbreviation field and download the updated settings when finished."
+        )
+
+        st.image(
+            "instructions/images/streetTypeAdd.jpg",
+            caption="Adding Street Types",
+            use_container_width=True,
+        )
 
 
 editPage = st.Page(editParamsPage, title="Edit Parameters", url_path="edit-params")
@@ -911,7 +1065,8 @@ postalCodePage = st.Page(editPostalCodePage, title="Edit Postal Codes", url_path
 site = st.navigation([
     mainPage,
     reviewPage,
-    editPage
+    editPage,
+    instructionsPage,
 ], expanded=True, position="top" 
 )
 site.run()

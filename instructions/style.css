@@ -1,0 +1,13 @@
+body {
+    font-family: Arial, sans-serif;
+    font-size: 1.5rem;
+    line-height: 1.6;
+    margin: 0 auto;
+    padding: 0 5vw;
+}
+
+.note {
+    font-size: 1.2rem;
+    color: #373636;
+    margin-top: 10px;
+}

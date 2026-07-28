@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Instructions</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <article class="instructions">
+        <h1>Validation Instructions</h1>
+        <p><strong>Step 1:</strong> Click upload to open your file browser.</p>
+        </br>
+        <img src="images/step1.gif" alt="Step 1">
+        </br>
+        <p><strong>Step 2:</strong> Select the Excel file you want to validate and click "Open".</p><p><strong>Note:</strong> The file must be in .xlsx format.</p>
+        </br>
+        <img src="images/step2.jpg" alt="Step 2">
+        </br>
+        <p class="note"><strong>Note:</strong> Ensure that your Excel file contains the correct columns for address validation.</p>
+        </br>
+        <img src="images/columns.png" alt="ID, Address, City, State, Postal Code, and Country">
+        <caption>Required Columns: ID, Address, City, State, Postal Code, and Country</caption>
+        </br>
+        <p><strong>Step 3:</strong> After selecting the file, click the "Validate" button to start the validation process.</p><p>Once the page refreshes, you will have the option to view or export the results.</p>
+        <img src="images/step3.jpg" alt="Step 3">
+    </article>
+    <article>
+        <h1>Review and Save Results Instructions</h1>
+        <p><strong>Step 1:</strong> To navigate to the review page, click the "Display Results" button after the validation process is complete or the "Review Results" link in the navigation menu.</p>
+        </br>
+        <p><strong>Step 2:</strong> In default mode, you will see two tables: valid addresses on the left in green and invalid addresses on the right in red. You can scroll through the tables to review the results.</p>
+        </br> 
+        <img src="images/review1.jpg" alt="Review Page">
+        </br>
+        <p><strong>Step 3:</strong> To enter editing mode, check the "Show edit mode" checkbox above the results. In edit mode you can edit the address fields directly in the table.</p>
+        </br>
+        <h3>Note:</h3>
+        <ul>
+            <li>Testing an invalid address will automatically move it to the valid addresses table if edits are valid.</li>
+            <li>Testing an already valid address will not move it or even save results automatically.</li>
+            <li>Marking an address as valid will save it as-is, it will not automatically fill blanks or be converted to a standardized format.</li>
+            <li>Saving edits to an address only stores the changes to the exported Excel file, it does not change the original data.</li>
+            <li>Although it is possible to edit the ID, it is not recommended as it may cause issues with the database. It is best to keep the record ID as-is.</li>
+            <li>When entering data, using the full form of the address fields is recommended. (e.g., "Ontario" instead of "On", "Street" instead of "St.").</li>
+        </ul>
+        </br>
+        <p><strong>Step 4:</strong> Once you have reviewed and edited the addresses, click the "Download Results" button to export the results to zipped Excel files.</p>
+    </article>
+    <article>
+        <h1>Street Type Parameters</h1>
+        <p>This page provides information about the street type parameters used in the address validation process.</p>
+        <p>Street types are standardized abbreviations for common street suffixes, such as "St" for "Street" or "Ave" for "Avenue".</p>
+        </br>
+        <h2>Uploading a file from previous edits</h2>
+        <p>If you have previously exported the results and want to re-upload the file for further validation, you can do so by clicking the "Upload" button and selecting the exported Excel file.</p>
+        <p>Ensure that the file is in .json format and was previously exported from the address validation tool.</p>
+        <p class="note"><em>For visual reference on uploading a previously exported file, refer to the "Validation Instructions" section above.</em></p>
+        </br>
+        <h2>Making Edits</h2>
+        <p><strong>Step 1:</strong> Find the standardized street type you want to edit (e.g., "St" for "Street"). <em>If you want to add one, find the section for adding new street types below.</em></p>
+        </br>
+        <p><strong>Step 2:</strong> Click the table cell containing the street type you want to edit. The cell will open for editing.</p>
+        <br>
+        <p><strong>Step 3:</strong> There will be two fields: one for the abbreviation and one for the full street type name. To add another form, be sure to separate it by only a new line.</p>
+        <p><strong>Note:</strong> Make sure to download the updated settings after making edits so they can be used in future validations.</p>
+        <br>
+        <img src="images/streetTypeEdit.jpg" alt="Street Type Edit">
+        <br>
+        <h2>Adding New Street Types</h2>
+        <p><strong>Step 1:</strong> Scroll to the bottom of the street type table to find the "Add New Street Type" section.</p>
+        <br>
+        <p><strong>Step 2:</strong> Enter the abbreviation and full street type name in the respective fields. If you want to add another form, be sure to separate it by only a new line.</p>
+        <p class="note"><strong>Note:</strong> Make sure to copy the standardized form into the abbreviation field and download the updated settings for next use.</p>
+        <br>
+        <img src="images/streetTypeAdd.jpg" alt="Street Type Add">
+    </article>
+</body>
