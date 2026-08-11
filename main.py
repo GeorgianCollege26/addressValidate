@@ -10,8 +10,15 @@ import unicodedata
 import datetime
 import time
 import json
+from dateutil import parser as dateutil_parser
 import uuid
 from io import BytesIO
+
+if st.session_state.get('startDate') is None:
+    st.session_state.startDate = datetime.date.today()
+
+if st.session_state.get('endDate') is None:
+    st.session_state.endDate = datetime.date.today()
 
 if st.session_state.get('streetTypeJSON') is None:
     st.session_state.customStreetTypeJSON = False
@@ -23,6 +30,8 @@ if st.session_state.get('postalCodePatterns') is None:
     with open("postalCodes.json", "r") as f:
         st.session_state.postalCodePatterns = json.load(f)
 
+if st.session_state.get('dateDoesntInvalidate') is None:
+    st.session_state.dateDoesntInvalidate = False
 
 def validateState(country, state):
     if not country:
@@ -142,12 +151,12 @@ def validateAddress(address):
     errorFields = []
     
     # If any of the required fields are missing, return an error message specifying which field is missing
-    for field in ['country', 'state', 'city', 'postalCode', 'streetAddress', 'recordId']:
+    for field in ['country', 'state', 'city', 'postalCode', 'streetAddress', 'recordId', 'timestamp']:
         if address.get(field) == None or str(address.get(field)).strip().lower() == "none":
             errorFields.append(f"{field}")
     if errorFields:
-        errorFields.append("missing")
-        address['error'] = errorFields
+        missingError = "Missing required fields: " + ", ".join(errorFields)
+        address['error'] = missingError
         return address  
 
 
@@ -203,6 +212,24 @@ def validateAddress(address):
         
         if not streetValid:
             errorFields.append("Street type could not be determined from the address.")
+
+
+        # Check if the timestamp is a valid date object
+        if st.session_state.get('startDate') != st.session_state.get('endDate'): #ignore check if start and end dates are the same
+            if not address.get('timestamp'):
+                errorFields.append("Timestamp is required for date range validation.")
+            elif address.get('timestamp') and not isinstance(address.get('timestamp'), (datetime.date, datetime.datetime)):
+                parsedDate = parseDate(address.get('timestamp'))
+                address['timestamp'] = parsedDate.date() if isinstance(parsedDate, datetime.datetime) else parsedDate
+
+            if not address.get('timestamp'):
+                errorFields.append(f"Timestamp {address.get('timestamp')} is not a valid date.")
+
+
+            # Check if the timestamp is within the start and end date range
+            if address.get('timestamp') and not (st.session_state.startDate <= address.get('timestamp') <= st.session_state.endDate):
+                #Skip if start and end dates are the same, as this is likely a single date range
+                errorFields.append(f"Timestamp {address.get('timestamp')} is not within the specified date range ({st.session_state.startDate} to {st.session_state.endDate}).")
         
         if errorFields:
             address['error'] = ", ".join(errorFields)
@@ -218,6 +245,7 @@ def validateAddress(address):
             'postalCode': formatString(postalCodeValid, toUpper=True, removeAccents=True, leaveApostrophes=True),
             'streetAddress': formatString(streetValid, toUpper=True, removeAccents=True, leaveApostrophes=True),
             'city': formatString(city, toUpper=True, removeAccents=True, leaveApostrophes=True),
+            'timestamp': address.get('timestamp'),
             'recordId': str(address.get('recordId')),
             'programId': str(address.get('programId')),
             'error': None
@@ -227,7 +255,50 @@ def validateAddress(address):
     except Exception as e:
         address['error'] = f"An error occurred during validation: {str(e)}"
         return address
-        
+
+def parseDate(dateValue):
+    if not dateValue:
+        return None
+
+    dateString = str(dateValue).strip()
+
+    # Junk/placeholder values
+    junk_values = {"n/a", "na", "none", "null", "-", "00/00/0000", "0000-00-00"}
+    if dateString.lower() in junk_values:
+        return None
+
+    #Remove st, nd, rd, th from dates like 1st, 2nd, 3rd, 4th
+    dateString = re.sub(r"(\d+)(st|nd|rd|th)", r"\1", dateString)
+
+    # Explicit formats to try first (fast, unambiguous)
+    known_formats = [
+        "%Y-%m-%d",       # 2024-07-23
+        "%m/%d/%Y",       # 07/23/2024
+        "%d/%m/%Y",       # 23/07/2024
+        "%Y/%m/%d",       # 2024/07/23
+        "%B %d, %Y",      # July 23, 2024
+        "%B %dst, %Y",    # March 5th, 2024 (handled separately below)
+        "%b %d, %Y",      # Jul 23, 2024
+        "%d-%m-%Y",       # 23-04-2023
+        "%m-%d-%Y",       # 07-23-2024
+        "%Y-%m-%d %H:%M:%S",
+    ]
+
+    for f in known_formats:
+        try:
+            return datetime.datetime.strptime(dateString, f)
+        except ValueError:
+            continue
+
+    # dateutil's fuzzy parser as fallback
+    # (e.g. "5-6-24", "2023/1/1", inconsistent spacing)
+    try:
+        return dateutil_parser.parse(dateString, fuzzy=True)
+    except (ValueError, OverflowError):
+        return None
+
+    
+
 
 
 def getCountryCode(countryName):
@@ -337,6 +408,7 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
     foundPostalCode = None
     foundAddressLine = None
     foundCity = None
+    foundDate = None
     errors = []
     unclaimed = []
     
@@ -355,6 +427,27 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
         testState = getState(currentCol, foundCountry, "name")
         #st.info(f"Testing {currentCol} for state with country {foundCountry}. Result: {testState}")
         testStreet = validateStreetType(abbreviateAddress(currentCol))
+
+        #If column is a date or datetime, mark it as a date and remove from unclaimed list
+        # check if the column is a datetime object
+        if isinstance(colList[j], datetime.date):
+            foundDate = colList[j]
+            try:
+                unclaimed.remove(currentCol)
+            except ValueError:
+                pass
+        # If the column is a string that can be parsed as a date, mark it as a date and remove from unclaimed list
+        if isinstance(colList[j], str):
+            try:
+                parsedDate = parseDate(colList[j])
+                if parsedDate:
+                    foundDate = parsedDate.date() if isinstance(parsedDate, datetime.datetime) else parsedDate
+                    try:
+                        unclaimed.remove(currentCol)
+                    except ValueError:
+                        pass
+            except Exception as e:
+                pass
 
 
         if testState:
@@ -404,17 +497,19 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
                 unclaimed.remove(currentCol)
             except ValueError:                
                 pass
-        if foundCountry and foundState and foundPostalCode and foundAddressLine and len(unclaimed) == 1:
+
+        if foundCountry and foundState and foundPostalCode and foundAddressLine and foundDate and len(unclaimed) == 1:
             foundCity = unclaimed[0]
             
-    if foundCountry and foundState and foundPostalCode and foundAddressLine and foundCity:
+    if foundCountry and foundState and foundPostalCode and foundAddressLine and foundCity and foundDate:
         address = {
             'country': foundCountry,
             'state': foundState,
             'postalCode': foundPostalCode,
             'streetAddress': foundAddressLine,
             'city': foundCity,
-            'error': errors.insert(0, "passed column swap fix"),
+            'timestamp': foundDate,
+            'error': errors.insert(0, "passed column swap fix") if errors else None,
             'recordId': str(addressID),
             'programId': f'{addressID}_{uuid.uuid4()}'
         }
@@ -448,7 +543,8 @@ def displayResults(validList, invalidList):
                             'streetAddress': valid.get('streetAddress'), 
                             'city': valid.get('city'), 
                             'recordId': valid.get('recordId'),
-                            'programId': valid.get('programId')}
+                            'programId': valid.get('programId'),
+                            'timestamp': valid.get('timestamp')}
                 
                 if editMode:
                     try:
@@ -458,7 +554,13 @@ def displayResults(validList, invalidList):
                                     address[col] = st.text_input(f"Edit {col}", value=str(address[col]), key=f"valid_{col}_{valid['programId']}")
                                 else:
                                     address[col] = st.text_input(f"Edit {col}", value="", key=f"valid_{col}_{address['programId']}")
-
+                            if valid.get('timestamp') and isinstance(valid.get('timestamp'), datetime.date):
+                                address['timestamp'] = st.date_input("Edit timestamp", value=valid.get('timestamp') if valid.get('timestamp') else datetime.date.today(), key=f"valid_timestamp_{valid['programId']}", min_value=datetime.date(1900, 1, 1))
+                            else:
+                                st.write(f"Timestamp could not be interpreted: {address['timestamp']}. Please enter a valid date.")
+                                address['timestamp'] = st.date_input("Edit timestamp", value=datetime.date.today(), key=f"valid_timestamp_{valid['programId']}", min_value=datetime.date(1900, 1, 1))                
+                            
+                            
                             # Save edits button
                             if st.button("Save edits", key=f"saveVal_{valid['programId']}"):
                                 index = st.session_state.validList.index(valid)
@@ -469,6 +571,10 @@ def displayResults(validList, invalidList):
                             if st.button("Test changes", key=f"test_valid_{valid['programId']}"):
                                 testResult = validateAddress(address)
                                 if not testResult['error']:
+                                    st.success(f"After changes, address is still valid: {testResult['streetAddress']}, {testResult['city']} {testResult['state']}, {testResult['postalCode']}, {testResult['country']}.")
+                                    index = st.session_state.validList.index(valid)
+                                    st.session_state.validList[index] = testResult
+                                elif st.session_state.dateDoesntInvalidate and dateError(testResult['error']):
                                     st.success(f"After changes, address is still valid: {testResult['streetAddress']}, {testResult['city']} {testResult['state']}, {testResult['postalCode']}, {testResult['country']}.")
                                     index = st.session_state.validList.index(valid)
                                     st.session_state.validList[index] = testResult
@@ -502,6 +608,7 @@ def displayResults(validList, invalidList):
                             'city': invalid.get('city'), 
                             'recordId': invalid.get('recordId'),
                             'programId': invalid.get('programId'),  
+                            'timestamp': invalid.get('timestamp')
                             }
                 if editMode:
                     with invCon.expander(f"{invalid['recordId']} : {invalid['streetAddress']}, {invalid['city']} {invalid['state']}, {invalid['postalCode']}, {invalid['country']}"):
@@ -514,6 +621,11 @@ def displayResults(validList, invalidList):
                                 address[col] = st.text_input(f"Edit {col}", value=str(address[col]), key=f"{col}_{address['programId']}")
                             else:
                                 address[col] = st.text_input(f"Edit {col}", value="", key=f"{col}_{address['programId']}")
+                        if invalid.get('timestamp') and isinstance(invalid.get('timestamp'), datetime.date):
+                            address['timestamp'] = st.date_input("Edit timestamp", value=invalid.get('timestamp') if invalid.get('timestamp') else datetime.date.today(), key=f"invalid_timestamp_{invalid['programId']}", min_value=datetime.date(1900, 1, 1))
+                        else:
+                            st.write(f"Timestamp could not be interpreted: {address['timestamp']}. Please enter a valid date.")
+                            address['timestamp'] = st.date_input("Edit timestamp", value=datetime.date.today(), key=f"invalid_timestamp_{invalid['programId']}", min_value=datetime.date(1900, 1, 1))
 
                         # Save edits button
                         if st.button("Save edits", key=f"saveInv_{invalid['programId']}"):
@@ -527,6 +639,13 @@ def displayResults(validList, invalidList):
                             testResult = validateAddress(address)
                             if not testResult['error']:
                                 st.success(f"After changes, address is now valid: {testResult['streetAddress']}, {testResult['city']} {testResult['state']}, {testResult['postalCode']}, {testResult['country']}. Moving to valid list...")
+                                st.session_state.validList.append(testResult)
+                                st.session_state.invalidList.remove(invalid)
+                                
+                                time.sleep(2)
+                                refreshPage()
+                            elif st.session_state.dateDoesntInvalidate and dateError(testResult['error']):
+                                st.success(f"After changes, address is still valid: {testResult['streetAddress']}, {testResult['city']} {testResult['state']}, {testResult['postalCode']}, {testResult['country']}. Moving to valid list...")
                                 st.session_state.validList.append(testResult)
                                 st.session_state.invalidList.remove(invalid)
                                 
@@ -558,6 +677,12 @@ def displayResults(validList, invalidList):
     except Exception as e:
         st.error(f"An error occurred while displaying results: {str(e)}")
 
+def dateError(errorString):
+    """Return True if every error in the (comma-joined) error string is about the timestamp/date range."""
+    if not errorString:
+        return False
+    errors = [e.strip() for e in errorString.split(",")]
+    return all(("timestamp" in e.lower() or "date range" in e.lower()) for e in errors)
 
 def saveResults(validList, invalidList):
     #Open file and load main sheet, set column widths, and add header row
@@ -569,8 +694,10 @@ def saveResults(validList, invalidList):
     sheet.column_dimensions['D'].width = 15
     sheet.column_dimensions['E'].width = 10
     sheet.column_dimensions['F'].width = 15
-    sheet.append(["Record ID", "Street Address", "City", "State/Province", "Postal Code", "Country"])
-    
+    sheet.column_dimensions['G'].width = 20
+    sheet.column_dimensions['H'].width = 6
+    sheet.append(["Record ID", "Street Address", "City", "State/Province", "Postal Code", "Country", "Timestamp", "Expired"])
+
     # Format and save to sheet
     for valid in validList:
         # Make title case and format strings
@@ -581,7 +708,23 @@ def saveResults(validList, invalidList):
                     continue
                 #remove [] and () and their contents from the string
                 valid[col] = re.sub(r'\[.*?\]|\(.*?\)', '', valid[col]).title()
-        sheet.append([valid['recordId'], valid['streetAddress'], valid['city'], valid['state'] if len(str(valid['state'])) == 2 else valid['state'], valid['postalCode'], valid['country']])
+
+        #Check if address has an error about the date range, and if so, mark it as expired in the output file
+        if valid.get('error') and isinstance(valid.get('error'), list):
+            for error in valid.get('error', []):
+                if "timestamp" in error.lower() or "date range" in error.lower():
+                    expired = True
+                else:
+                    expired = False
+        elif valid.get('error') and isinstance(valid.get('error'), str):
+            if "timestamp" in valid.get('error').lower() or "date range" in valid.get('error').lower():
+                expired = True
+            else:
+                expired = False
+        else:
+            expired = False
+        sheet.append([valid['recordId'], valid['streetAddress'], valid['city'], valid['state'] if len(str(valid['state'])) == 2 else valid['state'], valid['postalCode'], valid['country'], valid['timestamp'], expired])
+
     # Save the workbook to a file
     validBuffer = BytesIO()
     validFile.save(validBuffer)
@@ -596,11 +739,14 @@ def saveResults(validList, invalidList):
     sheet.column_dimensions['D'].width = 15
     sheet.column_dimensions['E'].width = 10
     sheet.column_dimensions['F'].width = 15
-    sheet.append(["Record ID", "Street Address", "City", "State/Province", "Postal Code", "Country"])
+    sheet.column_dimensions['G'].width = 20
+    sheet.column_dimensions['H'].width = 6
+    sheet.append(["Record ID", "Street Address", "City", "State/Province", "Postal Code", "Country", "Timestamp"])
 
     # Add each invalid address to the sheet without formatting, to preserve the original data for review
     for invalid in invalidList:
-        sheet.append([invalid['recordId'], invalid['streetAddress'], invalid['city'], invalid['state'], invalid['postalCode'], invalid['country']])
+        sheet.append([invalid['recordId'], invalid['streetAddress'], invalid['city'], invalid['state'], invalid['postalCode'], invalid['country'], invalid['timestamp']])
+
     # Save
     invalidBuffer = BytesIO()
     invalidFile.save(invalidBuffer)
@@ -667,7 +813,7 @@ def mainPage():
             with st.progress(0, text="Processing"):
                 progressBar = st.progress(0)
                 # Read the Excel file using pandas
-                # Excel rows: record id, Address line 1, City, Province/State, Postal Code, Country
+                # Excel rows: record id, Address line 1, City, Province/State, Postal Code, Country, timestamp
                 sheet = op.load_workbook(uploadedFile).active
                 validList = []
                 invalidList = []
@@ -687,6 +833,7 @@ def mainPage():
                     postalCode = ((row[4]))
                     country = row[5]
                     addressId = row[0]
+                    timestamp = row[6]
 
                     #Assign columns to dict
                     address = {
@@ -696,11 +843,15 @@ def mainPage():
                         'postalCode': postalCode,
                         'streetAddress': addressLine,
                         'recordId': addressId,
+                        'timestamp': timestamp,
                         'error': None,
-                        'programId': f'{addressId}_{uuid.uuid4()}'
+                        'programId': f'{addressId}_{uuid.uuid4()}' #Key to prevent duplicate keys in session state when editing addresses
                     }
                     validateResult = validateAddress(address)
                     if not validateResult['error']:
+                        validList.append(validateResult)
+                        ##st.write(f"{streetAddress} {streetType}, {state}, {postalCode}, {country} is valid.")
+                    elif st.session_state.dateDoesntInvalidate and dateError(validateResult['error']):
                         validList.append(validateResult)
                         ##st.write(f"{streetAddress} {streetType}, {state}, {postalCode}, {country} is valid.")
                     else:
@@ -719,6 +870,27 @@ def mainPage():
                         else:
                             invalidList.append(validateResult)
                 
+            dummyAddress = {
+                'country': 'N/A',
+                'state': 'N/A',
+                'city': 'N/A',
+                'postalCode': 'N/A',
+                'streetAddress': 'N/A',
+                'recordId': 'N/A',
+                'timestamp': datetime.datetime.now(),
+                'error': "No addresses found.",
+                'programId': f'N/A_{uuid.uuid4()}'
+            }
+            if invalidList and not validList:
+                validList.append(dummyAddress)
+                st.warning("No valid addresses found. A dummy address has been added to the valid list for display purposes.")
+            elif not invalidList and validList:
+                st.warning("No invalid addresses found. A dummy address has been added to the invalid list for display purposes.")
+                invalidList.append(dummyAddress)
+            elif not invalidList and not validList:
+                st.warning("No valid or invalid addresses found. A dummy address has been added to both lists for display purposes.")
+                validList.append(dummyAddress)
+                invalidList.append(dummyAddress)
 
             # Update session state with results
             st.session_state.validList = validList
@@ -732,6 +904,8 @@ def mainPage():
 
         except Exception as e:
             st.error(f"An error occurred while processing the file: {str(e)}")
+            if "tuple index" in str(e):
+                st.warning("It seems there may be an issue with the column order or missing columns in the uploaded file. Please ensure the spreadsheet has the correct columns in the expected order.")
             st.info("Please ensure the uploaded file is a valid Excel spreadsheet with the correct columns.")
 
 def reviewPage():
@@ -758,8 +932,17 @@ def reviewPage():
 
 def editParamsPage():
     st.title("Edit Parameters")
-    st.info("This page allows you to edit the parameters used for address validation. You can add or remove valid street types. Please be careful when editing these parameters, as they may affect the validation results.")
-    
+    st.info("This page allows you to edit the parameters used for address validation. You can add or remove valid street types. Please be careful when editing these parameters, as they affect the validation results. Date check is skipped when dates are identical.")
+
+    st.subheader("Date range for address validation")
+    st.session_state.startDate = st.date_input("Start date", value=st.session_state.startDate, min_value=datetime.date(1900, 1, 1))
+    st.session_state.endDate = st.date_input("End date", value=st.session_state.endDate, min_value=st.session_state.startDate)
+    st.session_state.dateDoesntInvalidate = st.checkbox("Ignore dates for file output", value=st.session_state.dateDoesntInvalidate) 
+
+    if st.session_state.startDate == st.session_state.endDate:
+        st.warning("Start date and end date are the same. Date check will be skipped.")
+
+    st.subheader("Valid Street Types")
     validTypes = st.session_state.streetTypeJSON
 
     groups = {}
@@ -779,7 +962,6 @@ def editParamsPage():
             except Exception as e:
                 st.error(f"An error occurred while loading the JSON: {str(e)}")
 
-    st.subheader("Valid Street Types")
     # Display the valid street types in a text area for editing
     for abbreviation, standardized in validTypes.items():
         if standardized not in groups:
@@ -1057,7 +1239,7 @@ def instructionsPage():
             use_container_width=True,
         )
 
-
+#Set pages and navigation
 editPage = st.Page(editParamsPage, title="Edit Parameters", url_path="edit-params")
 reviewPage = st.Page(reviewPage, title="Review Results", url_path="review")
 mainPage = st.Page(mainPage, title="Validator", url_path="validator", default=True)
@@ -1069,5 +1251,5 @@ site = st.navigation([
     instructionsPage,
 ], expanded=True, position="top" 
 )
+#launch the site
 site.run()
-#st.sidebar.selectbox("Select a page", ["Upload and Validate", "Review Results"])
