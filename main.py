@@ -216,8 +216,11 @@ def validateAddress(address):
 
         # Check if the timestamp is a valid date object
         if st.session_state.get('startDate') != st.session_state.get('endDate'): #ignore check if start and end dates are the same
+            #check for null
             if not address.get('timestamp'):
                 errorFields.append("Timestamp is required for date range validation.")
+
+            #Check if its a datetime object, if not : try to parse
             elif address.get('timestamp') and not isinstance(address.get('timestamp'), (datetime.date, datetime.datetime)):
                 parsedDate = parseDate(address.get('timestamp'))
                 address['timestamp'] = parsedDate.date() if isinstance(parsedDate, datetime.datetime) else parsedDate
@@ -225,11 +228,14 @@ def validateAddress(address):
             if not address.get('timestamp'):
                 errorFields.append(f"Timestamp {address.get('timestamp')} is not a valid date.")
 
-
             # Check if the timestamp is within the start and end date range
-            if address.get('timestamp') and not (st.session_state.startDate <= address.get('timestamp') <= st.session_state.endDate):
+            isExpired = not (st.session_state.startDate <= address.get('timestamp') <= st.session_state.endDate) if address.get('timestamp') else True
+
+            #add as an error if the timestamp is not within the specified date range, unless the user has chosen to ignore date range validation
+            if address.get('timestamp') and isExpired:
                 #Skip if start and end dates are the same, as this is likely a single date range
-                errorFields.append(f"Timestamp {address.get('timestamp')} is not within the specified date range ({st.session_state.startDate} to {st.session_state.endDate}).")
+                if not st.session_state.dateDoesntInvalidate:
+                    errorFields.append(f"Timestamp {address.get('timestamp')} is not within the specified date range ({st.session_state.startDate} to {st.session_state.endDate}).")
         
         if errorFields:
             address['error'] = ", ".join(errorFields)
@@ -248,7 +254,8 @@ def validateAddress(address):
             'timestamp': address.get('timestamp'),
             'recordId': str(address.get('recordId')),
             'programId': str(address.get('programId')),
-            'error': None
+            'error': None,
+            'expired': isExpired,
         }
         ##st.success(f"{validatedAddress['streetAddress']}, {validatedAddress['city']} {validatedAddress['state']}, {validatedAddress['postalCode']}, {validatedAddress['country']} is valid.")
         return validatedAddress
@@ -502,6 +509,8 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
             foundCity = unclaimed[0]
             
     if foundCountry and foundState and foundPostalCode and foundAddressLine and foundCity and foundDate:
+        # Check if the timestamp is within the start and end date range
+        isExpired = not (st.session_state.startDate <= address.get('timestamp') <= st.session_state.endDate) if address.get('timestamp') else True
         address = {
             'country': foundCountry,
             'state': foundState,
@@ -511,7 +520,8 @@ def fixSwappedCols(addressLineCol, cityCol, stateCol, postalCodeCol, countryRowC
             'timestamp': foundDate,
             'error': errors.insert(0, "passed column swap fix") if errors else None,
             'recordId': str(addressID),
-            'programId': f'{addressID}_{uuid.uuid4()}'
+            'programId': f'{addressID}_{uuid.uuid4()}',
+            'expired': isExpired
         }
         return address
     else:
@@ -537,14 +547,7 @@ def displayResults(validList, invalidList):
                         # Remove [] and () and their contents from the string, and convert to title case
                         valid[col] = re.sub(r'\[.*?\]|\(.*?\)', '', str(valid[col])).title()
                 
-                address = {'country': valid.get('country'),
-                            'state': valid.get('state'),
-                            'postalCode': valid.get('postalCode'), 
-                            'streetAddress': valid.get('streetAddress'), 
-                            'city': valid.get('city'), 
-                            'recordId': valid.get('recordId'),
-                            'programId': valid.get('programId'),
-                            'timestamp': valid.get('timestamp')}
+                address = valid.copy()
                 
                 if editMode:
                     try:
@@ -601,15 +604,7 @@ def displayResults(validList, invalidList):
 
             invCon = st.container(height=600)
             for invalid in invalidList:
-                address = {'country': invalid.get('country'),
-                            'state': invalid.get('state'),
-                            'postalCode': invalid.get('postalCode'), 
-                            'streetAddress': invalid.get('streetAddress'), 
-                            'city': invalid.get('city'), 
-                            'recordId': invalid.get('recordId'),
-                            'programId': invalid.get('programId'),  
-                            'timestamp': invalid.get('timestamp')
-                            }
+                address = invalid.copy()
                 if editMode:
                     with invCon.expander(f"{invalid['recordId']} : {invalid['streetAddress']}, {invalid['city']} {invalid['state']}, {invalid['postalCode']}, {invalid['country']}"):
                         if invalid.get('error'):
@@ -875,11 +870,12 @@ def mainPage():
                 'state': 'N/A',
                 'city': 'N/A',
                 'postalCode': 'N/A',
-                'streetAddress': 'N/A',
+                'streetAddress': 'No addresses in category',
                 'recordId': 'N/A',
                 'timestamp': datetime.datetime.now(),
                 'error': "No addresses found.",
-                'programId': f'N/A_{uuid.uuid4()}'
+                'programId': f'N/A_{uuid.uuid4()}',
+                'expired': False
             }
             if invalidList and not validList:
                 validList.append(dummyAddress)
@@ -921,7 +917,7 @@ def reviewPage():
         st.warning("Although it is possible to edit the id, it is not recommended as it may cause issues with the database. It is best to keep the record ID as-is.")
     if st.session_state.get('validList') and st.session_state.get('invalidList'):
         displayResults(st.session_state.validList, st.session_state.invalidList)
-        if st.download_button("Download results as Excel files", data=saveResults(st.session_state.validList, st.session_state.invalidList), file_name="validated_addresses.zip", mime="application/zip"):
+        if st.download_button("Download results as Excel files", data=saveResults(st.session_state.validList, st.session_state.invalidList), file_name=f"validated_addresses_{timestamp}.zip", mime="application/zip"):
             st.success("Results saved as valid_addresses.xlsx and invalid_addresses.xlsx")
         if st.button("Back to Validator"):
             st.switch_page(mainPage)
