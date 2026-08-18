@@ -151,9 +151,13 @@ def validateAddress(address):
     errorFields = []
     
     # If any of the required fields are missing, return an error message specifying which field is missing
-    for field in ['country', 'state', 'city', 'postalCode', 'streetAddress', 'recordId', 'timestamp']:
+    for field in ['country', 'state', 'city', 'postalCode', 'streetAddress', 'recordId']:
         if address.get(field) == None or str(address.get(field)).strip().lower() == "none":
             errorFields.append(f"{field}")
+    if st.session_state.dateDoesntInvalidate == False:
+        if address.get('timestamp') == None or str(address.get('timestamp')).strip().lower() == "none":
+            errorFields.append("timestamp")
+
     if errorFields:
         missingError = "Missing required fields: " + ", ".join(errorFields)
         address['error'] = missingError
