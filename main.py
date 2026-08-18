@@ -223,13 +223,18 @@ def validateAddress(address):
             #Check if its a datetime object, if not : try to parse
             elif address.get('timestamp') and not isinstance(address.get('timestamp'), (datetime.date, datetime.datetime)):
                 parsedDate = parseDate(address.get('timestamp'))
-                address['timestamp'] = parsedDate.date() if isinstance(parsedDate, datetime.datetime) else parsedDate
+                timestamp = parsedDate.date() if isinstance(parsedDate, datetime.datetime) else parsedDate
 
-            if not address.get('timestamp'):
+            if not timestamp:
                 errorFields.append(f"Timestamp {address.get('timestamp')} is not a valid date.")
+            else:
+                address['timestamp'] = timestamp
 
             # Check if the timestamp is within the start and end date range
-            isExpired = not (st.session_state.startDate <= address.get('timestamp') <= st.session_state.endDate) if address.get('timestamp') else True
+            if address.get('timestamp') and isinstance(address.get('timestamp'), (datetime.date, datetime.datetime)):
+                isExpired = not (st.session_state.startDate <= address.get('timestamp') <= st.session_state.endDate)
+            else:
+                isExpired = True
 
             #add as an error if the timestamp is not within the specified date range, unless the user has chosen to ignore date range validation
             if address.get('timestamp') and isExpired:
@@ -562,7 +567,8 @@ def displayResults(validList, invalidList):
                             else:
                                 st.write(f"Timestamp could not be interpreted: {address['timestamp']}. Please enter a valid date.")
                                 address['timestamp'] = st.date_input("Edit timestamp", value=datetime.date.today(), key=f"valid_timestamp_{valid['programId']}", min_value=datetime.date(1900, 1, 1))                
-                            
+                            #expired status checkbox
+                            address['expired'] = st.checkbox("Expired", value=valid.get('expired', True), key=f"valid_expired_{valid['programId']}")
                             
                             # Save edits button
                             if st.button("Save edits", key=f"saveVal_{valid['programId']}"):
@@ -574,10 +580,6 @@ def displayResults(validList, invalidList):
                             if st.button("Test changes", key=f"test_valid_{valid['programId']}"):
                                 testResult = validateAddress(address)
                                 if not testResult['error']:
-                                    st.success(f"After changes, address is still valid: {testResult['streetAddress']}, {testResult['city']} {testResult['state']}, {testResult['postalCode']}, {testResult['country']}.")
-                                    index = st.session_state.validList.index(valid)
-                                    st.session_state.validList[index] = testResult
-                                elif st.session_state.dateDoesntInvalidate and dateError(testResult['error']):
                                     st.success(f"After changes, address is still valid: {testResult['streetAddress']}, {testResult['city']} {testResult['state']}, {testResult['postalCode']}, {testResult['country']}.")
                                     index = st.session_state.validList.index(valid)
                                     st.session_state.validList[index] = testResult
@@ -622,6 +624,10 @@ def displayResults(validList, invalidList):
                             st.write(f"Timestamp could not be interpreted: {address['timestamp']}. Please enter a valid date.")
                             address['timestamp'] = st.date_input("Edit timestamp", value=datetime.date.today(), key=f"invalid_timestamp_{invalid['programId']}", min_value=datetime.date(1900, 1, 1))
 
+                        #expired status checkbox
+                        address['expired'] = st.checkbox("Expired", value=invalid.get('expired', True), key=f"invalid_expired_{invalid['programId']}")
+
+
                         # Save edits button
                         if st.button("Save edits", key=f"saveInv_{invalid['programId']}"):
                             index = st.session_state.invalidList.index(invalid)
@@ -634,13 +640,6 @@ def displayResults(validList, invalidList):
                             testResult = validateAddress(address)
                             if not testResult['error']:
                                 st.success(f"After changes, address is now valid: {testResult['streetAddress']}, {testResult['city']} {testResult['state']}, {testResult['postalCode']}, {testResult['country']}. Moving to valid list...")
-                                st.session_state.validList.append(testResult)
-                                st.session_state.invalidList.remove(invalid)
-                                
-                                time.sleep(2)
-                                refreshPage()
-                            elif st.session_state.dateDoesntInvalidate and dateError(testResult['error']):
-                                st.success(f"After changes, address is still valid: {testResult['streetAddress']}, {testResult['city']} {testResult['state']}, {testResult['postalCode']}, {testResult['country']}. Moving to valid list...")
                                 st.session_state.validList.append(testResult)
                                 st.session_state.invalidList.remove(invalid)
                                 
@@ -672,12 +671,6 @@ def displayResults(validList, invalidList):
     except Exception as e:
         st.error(f"An error occurred while displaying results: {str(e)}")
 
-def dateError(errorString):
-    """Return True if every error in the (comma-joined) error string is about the timestamp/date range."""
-    if not errorString:
-        return False
-    errors = [e.strip() for e in errorString.split(",")]
-    return all(("timestamp" in e.lower() or "date range" in e.lower()) for e in errors)
 
 def saveResults(validList, invalidList):
     #Open file and load main sheet, set column widths, and add header row
@@ -691,10 +684,13 @@ def saveResults(validList, invalidList):
     sheet.column_dimensions['F'].width = 15
     sheet.column_dimensions['G'].width = 20
     sheet.column_dimensions['H'].width = 6
+    sheet.column_dimensions['I'].width = 50
     sheet.append(["Record ID", "Street Address", "City", "State/Province", "Postal Code", "Country", "Timestamp", "Expired"])
 
     # Format and save to sheet
-    for valid in validList:
+    for i in range(len(validList)):
+        valid = validList[i]
+
         # Make title case and format strings
         for col in ['streetAddress', 'city', 'state', 'country']:
             if valid.get(col):
@@ -704,21 +700,18 @@ def saveResults(validList, invalidList):
                 #remove [] and () and their contents from the string
                 valid[col] = re.sub(r'\[.*?\]|\(.*?\)', '', valid[col]).title()
 
-        #Check if address has an error about the date range, and if so, mark it as expired in the output file
-        if valid.get('error') and isinstance(valid.get('error'), list):
-            for error in valid.get('error', []):
-                if "timestamp" in error.lower() or "date range" in error.lower():
-                    expired = True
-                else:
-                    expired = False
-        elif valid.get('error') and isinstance(valid.get('error'), str):
-            if "timestamp" in valid.get('error').lower() or "date range" in valid.get('error').lower():
-                expired = True
-            else:
-                expired = False
-        else:
-            expired = False
-        sheet.append([valid['recordId'], valid['streetAddress'], valid['city'], valid['state'] if len(str(valid['state'])) == 2 else valid['state'], valid['postalCode'], valid['country'], valid['timestamp'], expired])
+        #Convert recordId to int if possible, otherwise keep as string
+        try:
+            valid['recordId'] = int(valid['recordId'])
+        except ValueError:
+            valid['recordId'] = str(valid['recordId'])
+
+        sheet.append([valid['recordId'], valid['streetAddress'], valid['city'], valid['state'] if len(str(valid['state'])) == 2 else valid['state'], valid['postalCode'], valid['country'], valid['timestamp'], "NO" if 'expired' in valid and not valid['expired'] else "YES"])
+
+        #If the timestamp is a datetime object, set column G of current row to excel date format, otherwise leave as string
+        if isinstance(valid['timestamp'], (datetime.datetime, datetime.date)):
+            cell = sheet.cell(row=i+2, column=7)
+            cell.number_format = 'YYYY-MM-DD'
 
     # Save the workbook to a file
     validBuffer = BytesIO()
@@ -736,11 +729,25 @@ def saveResults(validList, invalidList):
     sheet.column_dimensions['F'].width = 15
     sheet.column_dimensions['G'].width = 20
     sheet.column_dimensions['H'].width = 6
-    sheet.append(["Record ID", "Street Address", "City", "State/Province", "Postal Code", "Country", "Timestamp"])
+    sheet.column_dimensions['I'].width = 50
+    sheet.append(["Record ID", "Street Address", "City", "State/Province", "Postal Code", "Country", "Timestamp", "Expired", "Error"])
 
     # Add each invalid address to the sheet without formatting, to preserve the original data for review
-    for invalid in invalidList:
-        sheet.append([invalid['recordId'], invalid['streetAddress'], invalid['city'], invalid['state'], invalid['postalCode'], invalid['country'], invalid['timestamp']])
+    for i in range(len(invalidList)):
+        invalid = invalidList[i]
+
+        #Convert recordId to int if possible, otherwise keep as string
+        try:
+            invalid['recordId'] = int(invalid['recordId'])
+        except ValueError:
+            invalid['recordId'] = str(invalid['recordId'])
+
+
+        sheet.append([invalid['recordId'], invalid['streetAddress'], invalid['city'], invalid['state'], invalid['postalCode'], invalid['country'], invalid['timestamp'], "NO" if 'expired' in invalid and not invalid['expired'] else "YES", invalid['error'] if 'error' in invalid else None])
+        #If the timestamp is a datetime object, set column G of current row to excel date format, otherwise leave as string
+        if isinstance(invalid['timestamp'], (datetime.datetime, datetime.date)):
+            cell = sheet.cell(row=i+2, column=7)
+            cell.number_format = 'YYYY-MM-DD'
 
     # Save
     invalidBuffer = BytesIO()
@@ -846,9 +853,6 @@ def mainPage():
                     if not validateResult['error']:
                         validList.append(validateResult)
                         ##st.write(f"{streetAddress} {streetType}, {state}, {postalCode}, {country} is valid.")
-                    elif st.session_state.dateDoesntInvalidate and dateError(validateResult['error']):
-                        validList.append(validateResult)
-                        ##st.write(f"{streetAddress} {streetType}, {state}, {postalCode}, {country} is valid.")
                     else:
                         tryFix = None
                         if  "missing" in validateResult['error']:
@@ -917,6 +921,7 @@ def reviewPage():
         st.warning("Although it is possible to edit the id, it is not recommended as it may cause issues with the database. It is best to keep the record ID as-is.")
     if st.session_state.get('validList') and st.session_state.get('invalidList'):
         displayResults(st.session_state.validList, st.session_state.invalidList)
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         if st.download_button("Download results as Excel files", data=saveResults(st.session_state.validList, st.session_state.invalidList), file_name=f"validated_addresses_{timestamp}.zip", mime="application/zip"):
             st.success("Results saved as valid_addresses.xlsx and invalid_addresses.xlsx")
         if st.button("Back to Validator"):
